@@ -91,8 +91,8 @@ static double od_rsqrt_table(int i) {
   else return 1./sqrt(i);
 }
 
-#define FIXED_POINT_EXP (1)
-#define BETTER_SQRT_TABLES (0)
+#define FIXED_POINT_EXP (0)
+#define BETTER_SQRT_TABLES (1)
 
 #if BETTER_SQRT_TABLES
 int big_rsqrt_table_initialized = 0;
