@@ -91,6 +91,32 @@ static double od_rsqrt_table(int i) {
   else return 1./sqrt(i);
 }
 
+#define FIXED_POINT_EXP (1)
+#define BETTER_SQRT_TABLES (0)
+
+#if BETTER_SQRT_TABLES
+int big_rsqrt_table_initialized = 0;
+#define BIG_RSQRT_TABLE_SIZE 512
+double big_rsqrt_table[BIG_RSQRT_TABLE_SIZE];
+
+/*Generate a rsqrt table with rsqrt(start+1), rsqrt(start+1*2+1) ... 
+   rsqrt(start+size*2+1).
+  Not currently used for big_rsqrt_table.*/
+static void table_gen(double *table, const double start, const int size)
+{
+  int i = 0;
+  for (i = 0; i < size; i++)
+    table[i] = 1./sqrt(start+2*i+1);
+}
+
+static double rsqrt_thing(const double table[16], const int table_size,
+ const double start, const int i)
+{
+  if (i < table_size) return table[i];
+  else return 1./sqrt(start+2*i+1);
+}
+#endif
+
 /** Find the codepoint on the given PSphere closest to the desired
  * vector. Double-precision PVQ search just to make sure our tests
  * aren't limited by numerical accuracy.
@@ -111,11 +137,21 @@ static double pvq_search_rdo_double(const double *xcoeff, int n, int k,
   /* TODO - This blows our 8kB stack space budget and should be fixed when
    converting PVQ to fixed point. */
   double x[MAXN];
+#if FIXED_POINT_EXP
+  uint32_t x_int[MAXN];
+#endif
   double xx;
   double lambda;
   double norm_1;
   int rdo_pulses;
   double delta_rate;
+#if BETTER_SQRT_TABLES
+  if(!big_rsqrt_table_initialized) {
+    for (j = 0; j < BIG_RSQRT_TABLE_SIZE; j++)
+      big_rsqrt_table[j] = 1./sqrt(j+1);
+    big_rsqrt_table_initialized = 1;
+  }
+#endif
   xx = xy = yy = 0;
   for (j = 0; j < n; j++) {
     x[j] = fabs(xcoeff[j]);
@@ -148,6 +184,61 @@ static double pvq_search_rdo_double(const double *xcoeff, int n, int k,
      the first. */
   delta_rate = 3./n;
   /* Search one pulse at a time */
+#if FIXED_POINT_EXP
+  for (j = 0; j < n; j++) {
+    x_int[j] = x[j];
+  }
+  for (; i < k - rdo_pulses; i++) {
+    int pos;
+    uint64_t xy_uint64 = xy;
+    uint64_t yy_uint64 = yy;
+    pos = 0;
+    /*64 bit ints were faster than doubles but slower than 32 ints*/
+    if ((4*xy_uint64*xy_uint64)*(3*yy_uint64 + 1) > (1L << 32) - 1) {
+      uint64_t best_xy;
+      uint64_t best_yy;
+      best_xy = xy_uint64 + x_int[0];
+      best_yy = yy_uint64 + 2*ypulse[0] + 1;
+      best_xy *= best_xy;
+      for (j = 1; j < n; j++) {
+        uint64_t tmp_xy;
+        uint64_t tmp_yy;
+        tmp_xy = xy_uint64 + x_int[j];
+        tmp_yy = yy_uint64 + 2*ypulse[j] + 1;
+        tmp_xy *= tmp_xy;
+        if (tmp_xy*best_yy > best_xy*tmp_yy) {
+          best_xy = tmp_xy;
+          best_yy = tmp_yy;
+          pos = j;
+        }
+      }
+    }
+    else {
+      uint32_t xy_uint32 = xy_uint64;
+      uint32_t yy_uint32 = yy_uint64;
+      uint32_t best_xy;
+      uint32_t best_yy;
+      best_xy = xy_uint32 + x_int[0];
+      best_yy = yy_uint32 + 2*ypulse[0] + 1;
+      best_xy *= best_xy;
+      for (j = 1; j < n; j++) {
+        uint32_t tmp_xy;
+        uint32_t tmp_yy;
+        tmp_xy = xy_uint32 + x_int[j];
+        tmp_yy = yy_uint32 + 2*ypulse[j] + 1;
+        tmp_xy *= tmp_xy;
+        if (tmp_xy*best_yy > best_xy*tmp_yy) {
+          best_xy = tmp_xy;
+          best_yy = tmp_yy;
+          pos = j;
+        }
+      }
+    }
+    xy = xy + x[pos];
+    yy = yy + 2*ypulse[pos] + 1;
+    ypulse[pos]++;
+  }
+#else
   for (; i < k - rdo_pulses; i++) {
     int pos;
     double best_xy;
@@ -171,10 +262,12 @@ static double pvq_search_rdo_double(const double *xcoeff, int n, int k,
     yy = yy + 2*ypulse[pos] + 1;
     ypulse[pos]++;
   }
+#endif
   /* Search last pulses with RDO. Distortion is D = (x-y)^2 = x^2 - x*y + y^2
      and since x^2 and y^2 are constant, we just maximize x*y, plus a
      lambda*rate term. Note that since x and y aren't normalized here,
      we need to divide by sqrt(x^2)*sqrt(y^2). */
+#if !BETTER_SQRT_TABLES
   for (; i < k; i++) {
     int pos;
     double best_cost;
@@ -186,6 +279,35 @@ static double pvq_search_rdo_double(const double *xcoeff, int n, int k,
       tmp_xy = xy + x[j];
       tmp_yy = yy + 2*ypulse[j] + 1;
       tmp_xy = 2*tmp_xy*norm_1*od_rsqrt_table(tmp_yy) - lambda*j*delta_rate;
+      if (j == 0 || tmp_xy > best_cost) { 
+        best_cost = tmp_xy;
+        pos = j;
+      }
+    }
+    xy = xy + x[pos];
+    yy = yy + 2*ypulse[pos] + 1;
+    ypulse[pos]++;
+  }
+#else
+  for (; i < k; i++) {
+    double table[16];
+    int pos;
+    double best_cost;
+    pos = 0;
+    best_cost = -1e5;
+    if(yy+30 < BIG_RSQRT_TABLE_SIZE) {
+      int yy_int = yy;
+      for (j = 0; j < 16; j++) {
+        table[j] = big_rsqrt_table[2*j+yy_int];
+      }
+    }
+    else {
+      table_gen(table, yy, 16);
+    }
+    for (j = 0; j < n; j++) {
+      double tmp_xy;
+      tmp_xy = xy + x[j];
+      tmp_xy = 2*tmp_xy*norm_1*rsqrt_thing(table, 16, yy, ypulse[j]) - lambda*j*delta_rate;
       if (j == 0 || tmp_xy > best_cost) {
         best_cost = tmp_xy;
         pos = j;
@@ -195,6 +317,7 @@ static double pvq_search_rdo_double(const double *xcoeff, int n, int k,
     yy = yy + 2*ypulse[pos] + 1;
     ypulse[pos]++;
   }
+#endif
   for (i = 0; i < n; i++) {
     if (xcoeff[i] < 0) ypulse[i] = -ypulse[i];
   }
