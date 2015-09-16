@@ -1518,8 +1518,23 @@ static void od_mc_compute_satd_8x8_ver_c(int32_t *dest, int dystride,
   }
 }
 
+#define SATD_4x4 1
+
 int od_mc_compute_satd_8x8_c(const unsigned char *src, int systride,
  const unsigned char *ref, int dystride) {
+#if SATD_4x4
+  int32_t satd;
+  int i;
+  int j;
+  satd = 0;
+  for (i = 0; i < 8; i += 4) {
+    for (j = 0; j < 8; j += 4) {
+      satd += od_mc_compute_satd_4x4_c(src + i*systride + j, systride,
+       ref + i*dystride + j, dystride);
+    }
+  }
+  return satd;
+#else
   int satd;
   int16_t buff[8*8];
   int32_t buff2[8*8];
@@ -1530,6 +1545,7 @@ int od_mc_compute_satd_8x8_c(const unsigned char *src, int systride,
   for (i = 0; i < 8*8; i++) satd += abs(buff2[i]);
   satd = (satd + 4) >> 3;
   return satd;
+#endif
 }
 
 static void od_mc_compute_satd_16x16_hor_c(int16_t *dest, int dystride,
@@ -1601,6 +1617,19 @@ static void od_mc_compute_satd_16x16_ver_c(int32_t *dest, int dystride,
 
 int od_mc_compute_satd_16x16_c(const unsigned char *src, int systride,
  const unsigned char *ref, int dystride) {
+#if SATD_4x4
+  int32_t satd;
+  int i;
+  int j;
+  satd = 0;
+  for (i = 0; i < 16; i += 4) {
+    for (j = 0; j < 16; j += 4) {
+      satd += od_mc_compute_satd_4x4_c(src + i*systride + j, systride,
+       ref + i*dystride + j, dystride);
+    }
+  }
+  return satd;
+#else
   int32_t satd;
   int16_t buff[16*16];
   int32_t buff2[16*16];
@@ -1611,10 +1640,24 @@ int od_mc_compute_satd_16x16_c(const unsigned char *src, int systride,
   for (i = 0; i < 16*16; i++) satd += abs(buff2[i]);
   satd = (satd + 8) >> 4;
   return satd;
+#endif
 }
 
 int od_mc_compute_satd_32x32_c(const unsigned char *src, int systride,
  const unsigned char *ref, int dystride) {
+#if SATD_4x4
+  int32_t satd;
+  int i;
+  int j;
+  satd = 0;
+  for (i = 0; i < 32; i += 4) {
+    for (j = 0; j < 32; j += 4) {
+      satd += od_mc_compute_satd_4x4_c(src + i*systride + j, systride,
+       ref + i*dystride + j, dystride);
+    }
+  }
+  return satd;
+#else
   int32_t satd;
   int16_t buff[32*32];
   int16_t buff2[32*32];
@@ -1667,6 +1710,7 @@ int od_mc_compute_satd_32x32_c(const unsigned char *src, int systride,
   for (i = 0; i < blk_size*blk_size; i++) satd += abs(buff4[i]);
   satd = (satd + 16) >> 5;
   return satd;
+#endif
 }
 
 /*Computes the SAD of the input image against the given predictor.*/
