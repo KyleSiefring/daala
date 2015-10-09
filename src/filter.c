@@ -1612,6 +1612,66 @@ void od_apply_postfilter_frame_sbs(od_coeff *c0, int stride, int nhsb,
 #endif
 }
 
+#include <emmintrin.h>
+#include <stdio.h>
+#include "x86/x86int.h"
+
+static int count = 0;
+
+void print128_num16(__m128i var) {
+  int16_t *val = (int16_t*) &var;
+  printf("Numerical: %i %i %i %i %i %i %i %i \n", 
+   val[0], val[1], val[2], val[3], val[4], val[5], val[6], val[7]);
+}
+
+void print128_num32(__m128i var) {
+  int32_t *val = (int32_t*) &var;
+  printf("Numerical: %i %i %i %i \n", 
+   val[0], val[1], val[2], val[3]);
+}
+
+OD_SIMD_INLINE void od_transpose16x8(__m128i *t0, __m128i *t1,
+ __m128i *t2, __m128i *t3,  __m128i *t4, __m128i *t5, __m128i *t6, __m128i *t7) {
+  __m128i a1;
+  __m128i b1;
+  __m128i c1;
+  __m128i d1;
+  __m128i e1;
+  __m128i f1;
+  __m128i g1;
+  __m128i h1;
+  /*00112233*/
+  __m128i a0 = _mm_unpacklo_epi16(*t0, *t1);
+  __m128i b0 = _mm_unpacklo_epi16(*t2, *t3);
+  __m128i c0 = _mm_unpacklo_epi16(*t4, *t5);
+  __m128i d0 = _mm_unpacklo_epi16(*t6, *t7);
+  /*44556677*/
+  __m128i e0 = _mm_unpackhi_epi16(*t0, *t1);
+  __m128i f0 = _mm_unpackhi_epi16(*t2, *t3);
+  __m128i g0 = _mm_unpackhi_epi16(*t4, *t5);
+  __m128i h0 = _mm_unpackhi_epi16(*t6, *t7);
+  /*00001111*/
+  a1 = _mm_unpacklo_epi32(a0, b0);
+  b1 = _mm_unpacklo_epi32(c0, d0);
+  /*22223333*/
+  c1 = _mm_unpackhi_epi32(a0, b0);
+  d1 = _mm_unpackhi_epi32(c0, d0);
+  /*44445555*/
+  e1 = _mm_unpacklo_epi32(e0, f0);
+  f1 = _mm_unpacklo_epi32(g0, h0);
+  /*66667777*/
+  g1 = _mm_unpackhi_epi32(e0, f0);
+  h1 = _mm_unpackhi_epi32(g0, h0);
+  *t0 = _mm_unpacklo_epi64(a1, b1);
+  *t1 = _mm_unpackhi_epi64(a1, b1);
+  *t2 = _mm_unpacklo_epi64(c1, d1);
+  *t3 = _mm_unpackhi_epi64(c1, d1);
+  *t4 = _mm_unpacklo_epi64(e1, f1);
+  *t5 = _mm_unpackhi_epi64(e1, f1);
+  *t6 = _mm_unpacklo_epi64(g1, h1);
+  *t7 = _mm_unpackhi_epi64(g1, h1);
+}
+
 /* Detect direction. 0 means 45-degree up-right, 2 is horizontal, and so on.
    The search minimizes the weighted variance along all the lines in a
    particular direction, i.e. the squared error between the input and a
@@ -1622,24 +1682,241 @@ void od_apply_postfilter_frame_sbs(od_coeff *c0, int stride, int nhsb,
 static int od_dir_find8(const int16_t *img, int stride, int32_t *var) {
   int i;
   int cost[8] = {0};
-  int partial[8][15] = {{0}};
+  int partial[8][15+1]/* = {{0}}*/;
   int best_cost = 0;
   int best_dir = 0;
+  {
+    __m128i extend; 
+    __m128i tmp0;
+    __m128i tmp1;
+    __m128i tmp2;
+    __m128i tmp3;
+    __m128i tmp4;
+    __m128i row0;
+    __m128i row1;
+    __m128i row2;
+    __m128i row3;
+    __m128i row4;
+    __m128i row5;
+    __m128i row6;
+    __m128i row7;
+    row0 = _mm_load_si128((__m128i *)(img+0*stride));
+    row1 = _mm_load_si128((__m128i *)(img+1*stride));
+    row2 = _mm_load_si128((__m128i *)(img+2*stride));
+    row3 = _mm_load_si128((__m128i *)(img+3*stride));
+    row4 = _mm_load_si128((__m128i *)(img+4*stride));
+    row5 = _mm_load_si128((__m128i *)(img+5*stride));
+    row6 = _mm_load_si128((__m128i *)(img+6*stride));
+    row7 = _mm_load_si128((__m128i *)(img+7*stride)); 
+    row0 = _mm_srai_epi16(row0, OD_COEFF_SHIFT);
+    row1 = _mm_srai_epi16(row1, OD_COEFF_SHIFT);
+    row2 = _mm_srai_epi16(row2, OD_COEFF_SHIFT);
+    row3 = _mm_srai_epi16(row3, OD_COEFF_SHIFT);
+    row4 = _mm_srai_epi16(row4, OD_COEFF_SHIFT);
+    row5 = _mm_srai_epi16(row5, OD_COEFF_SHIFT);
+    row6 = _mm_srai_epi16(row6, OD_COEFF_SHIFT);
+    row7 = _mm_srai_epi16(row7, OD_COEFF_SHIFT);
+    /*partial[0][i + j] += x;*/
+/*jmspeex, I think instead you want to sum row1, shift the sum by 2 bytes (store those two bytes), add row2, shift the sum again by two bytes, and so on*/
+    tmp0 = _mm_bslli_si128(row1, 2);
+    tmp1 = _mm_bslli_si128(row2, 4);
+    tmp2 = _mm_bslli_si128(row3, 6);
+    tmp0 = _mm_add_epi16(row0, tmp0);
+    tmp1 = _mm_add_epi16(tmp1, tmp2);
+    tmp2 = _mm_bslli_si128(row4, 8);
+    tmp0 = _mm_add_epi16(tmp0, tmp1);
+    tmp1 = _mm_bslli_si128(row5, 10);
+    tmp0 = _mm_add_epi16(tmp0, tmp2);
+    tmp2 = _mm_bslli_si128(row6, 12);
+    tmp0 = _mm_add_epi16(tmp0, tmp1);
+    tmp1 = _mm_bslli_si128(row7, 14);
+    tmp0 = _mm_add_epi16(tmp0, tmp2);
+    tmp0 = _mm_add_epi16(tmp0, tmp1);
+    extend = _mm_cmplt_epi16(tmp0, _mm_setzero_si128());
+    _mm_store_si128((__m128i *)(partial[0]+0),
+     _mm_unpacklo_epi16(tmp0, extend));
+    _mm_store_si128((__m128i *)(partial[0]+4),
+     _mm_unpackhi_epi16(tmp0, extend));
+    tmp0 = _mm_bsrli_si128(row7, 2);
+    tmp1 = _mm_bsrli_si128(row6, 4);
+    tmp2 = _mm_bsrli_si128(row5, 6);
+    tmp0 = _mm_add_epi16(tmp0, tmp1);
+    tmp0 = _mm_add_epi16(tmp0, tmp2);
+    tmp1 = _mm_bsrli_si128(row4, 8);
+    tmp2 = _mm_bsrli_si128(row3, 10);
+    tmp0 = _mm_add_epi16(tmp0, tmp1);
+    tmp0 = _mm_add_epi16(tmp0, tmp2);
+    tmp1 = _mm_bsrli_si128(row2, 12);
+    tmp2 = _mm_bsrli_si128(row1, 14);
+    tmp0 = _mm_add_epi16(tmp0, tmp1);
+    tmp0 = _mm_add_epi16(tmp0, tmp2);
+    extend = _mm_cmplt_epi16(tmp0, _mm_setzero_si128());
+    _mm_store_si128((__m128i *)(partial[0]+8),
+     _mm_unpacklo_epi16(tmp0, extend));
+    _mm_store_si128((__m128i *)(partial[0]+12),
+     _mm_unpackhi_epi16(tmp0, extend));
+    /*partial[4][7 + i - j] += x;*/
+    tmp0 = _mm_bslli_si128(row6, 2);
+    tmp1 = _mm_bslli_si128(row5, 4);
+    tmp2 = _mm_bslli_si128(row4, 6);
+    tmp0 = _mm_add_epi16(row7, tmp0);
+    tmp1 = _mm_add_epi16(tmp1, tmp2);
+    tmp2 = _mm_bslli_si128(row3, 8);
+    tmp0 = _mm_add_epi16(tmp0, tmp1);
+    tmp1 = _mm_bslli_si128(row2, 10);
+    tmp0 = _mm_add_epi16(tmp0, tmp2);
+    tmp2 = _mm_bslli_si128(row1, 12);
+    tmp0 = _mm_add_epi16(tmp0, tmp1);
+    tmp1 = _mm_bslli_si128(row0, 14);
+    tmp0 = _mm_add_epi16(tmp0, tmp2);
+    tmp0 = _mm_add_epi16(tmp0, tmp1);
+    extend = _mm_cmplt_epi16(tmp0, _mm_setzero_si128());
+    _mm_store_si128((__m128i *)(partial[4]+0),
+     _mm_unpacklo_epi16(tmp0, extend));
+    _mm_store_si128((__m128i *)(partial[4]+4),
+     _mm_unpackhi_epi16(tmp0, extend));
+    tmp0 = _mm_bsrli_si128(row0, 2);
+    tmp1 = _mm_bsrli_si128(row1, 4);
+    tmp2 = _mm_bsrli_si128(row2, 6);
+    tmp0 = _mm_add_epi16(tmp0, tmp1);
+    tmp0 = _mm_add_epi16(tmp0, tmp2);
+    tmp1 = _mm_bsrli_si128(row3, 8);
+    tmp2 = _mm_bsrli_si128(row4, 10);
+    tmp0 = _mm_add_epi16(tmp0, tmp1);
+    tmp0 = _mm_add_epi16(tmp0, tmp2);
+    tmp1 = _mm_bsrli_si128(row5, 12);
+    tmp2 = _mm_bsrli_si128(row6, 14);
+    tmp0 = _mm_add_epi16(tmp0, tmp1);
+    tmp0 = _mm_add_epi16(tmp0, tmp2);
+    extend = _mm_cmplt_epi16(tmp0, _mm_setzero_si128());
+    _mm_store_si128((__m128i *)(partial[4]+8),
+     _mm_unpacklo_epi16(tmp0, extend));
+    _mm_store_si128((__m128i *)(partial[4]+12),
+     _mm_unpackhi_epi16(tmp0, extend));
+    {
+      __m128i row01;
+      __m128i row23;
+      __m128i row45;
+      __m128i row67;
+      row01 = _mm_add_epi16(row0, row1);
+      row23 = _mm_add_epi16(row2, row3);
+      row45 = _mm_add_epi16(row4, row5);
+      row67 = _mm_add_epi16(row6, row7);
+      /*partial[6][j] += x;*/
+      tmp0 = _mm_add_epi16(row01, row23);
+      tmp1 = _mm_add_epi16(row45, row67);
+      tmp0 = _mm_add_epi16(tmp0, tmp1);
+      extend = _mm_cmplt_epi16(tmp0, _mm_setzero_si128());
+      _mm_store_si128((__m128i *)(partial[6]+0),
+       _mm_unpacklo_epi16(tmp0, extend));
+      _mm_store_si128((__m128i *)(partial[6]+4),
+       _mm_unpackhi_epi16(tmp0, extend));
+      /*partial[7][i/2 + j] += x;*/
+      partial[7][0] = (short)_mm_extract_epi16(row01, 0);
+      tmp0 = _mm_bsrli_si128(row01, 2);
+      tmp0 = _mm_add_epi16(tmp0, row23);
+      partial[7][1] = (short)_mm_extract_epi16(tmp0, 0);
+      tmp0 = _mm_bsrli_si128(tmp0, 2);
+      tmp0 = _mm_add_epi16(tmp0, row45);
+      partial[7][2] = (short)_mm_extract_epi16(tmp0, 0);
+      tmp0 = _mm_bsrli_si128(tmp0, 2);
+      tmp0 = _mm_add_epi16(tmp0, row67);
+      extend = _mm_cmplt_epi16(tmp0, _mm_setzero_si128());
+      _mm_storeu_si128((__m128i *)(partial[7]+3),
+       _mm_unpacklo_epi16(tmp0, extend));
+      _mm_storeu_si128((__m128i *)(partial[7]+7),
+       _mm_unpackhi_epi16(tmp0, extend));
+      /*partial[5][3 - i/2 + j] += x;*/
+      partial[5][0] = (short)_mm_extract_epi16(row67, 0);
+      tmp0 = _mm_bsrli_si128(row67, 2);
+      tmp0 = _mm_add_epi16(tmp0, row45);
+      partial[5][1] = (short)_mm_extract_epi16(tmp0, 0);
+      tmp0 = _mm_bsrli_si128(tmp0, 2);
+      tmp0 = _mm_add_epi16(tmp0, row23);
+      partial[5][2] = (short)_mm_extract_epi16(tmp0, 0);
+      tmp0 = _mm_bsrli_si128(tmp0, 2);
+      tmp0 = _mm_add_epi16(tmp0, row01);
+      extend = _mm_cmplt_epi16(tmp0, _mm_setzero_si128());
+      _mm_storeu_si128((__m128i *)(partial[5]+3),
+       _mm_unpacklo_epi16(tmp0, extend));
+      _mm_storeu_si128((__m128i *)(partial[5]+7),
+       _mm_unpackhi_epi16(tmp0, extend));
+    }
+    od_transpose16x8(&row0, &row1, &row2, &row3, &row4, &row5, &row6, &row7);
+    {
+      __m128i row01;
+      __m128i row23;
+      __m128i row45;
+      __m128i row67;
+      row01 = _mm_add_epi16(row0, row1);
+      row23 = _mm_add_epi16(row2, row3);
+      row45 = _mm_add_epi16(row4, row5);
+      row67 = _mm_add_epi16(row6, row7);
+      /*partial[2][i] += x;*/
+      tmp0 = _mm_add_epi16(row01, row23);
+      tmp1 = _mm_add_epi16(row45, row67);
+      tmp0 = _mm_add_epi16(tmp0, tmp1);
+      extend = _mm_cmplt_epi16(tmp0, _mm_setzero_si128());
+      _mm_store_si128((__m128i *)(partial[2]+0),
+       _mm_unpacklo_epi16(tmp0, extend));
+      _mm_store_si128((__m128i *)(partial[2]+4),
+       _mm_unpackhi_epi16(tmp0, extend));
+      /*partial[7][i/2 + j] += x;*/
+      partial[1][0] = (short)_mm_extract_epi16(row01, 0);
+      tmp0 = _mm_bsrli_si128(row01, 2);
+      tmp0 = _mm_add_epi16(tmp0, row23);
+      partial[1][1] = (short)_mm_extract_epi16(tmp0, 0);
+      tmp0 = _mm_bsrli_si128(tmp0, 2);
+      tmp0 = _mm_add_epi16(tmp0, row45);
+      partial[1][2] = (short)_mm_extract_epi16(tmp0, 0);
+      tmp0 = _mm_bsrli_si128(tmp0, 2);
+      tmp0 = _mm_add_epi16(tmp0, row67);
+      extend = _mm_cmplt_epi16(tmp0, _mm_setzero_si128());
+      _mm_storeu_si128((__m128i *)(partial[1]+3),
+       _mm_unpacklo_epi16(tmp0, extend));
+      _mm_storeu_si128((__m128i *)(partial[1]+7),
+       _mm_unpackhi_epi16(tmp0, extend));
+      /*partial[5][3 - i/2 + j] += x;*/
+      partial[3][0] = (short)_mm_extract_epi16(row67, 0);
+      tmp0 = _mm_bsrli_si128(row67, 2);
+      tmp0 = _mm_add_epi16(tmp0, row45);
+      partial[3][1] = (short)_mm_extract_epi16(tmp0, 0);
+      tmp0 = _mm_bsrli_si128(tmp0, 2);
+      tmp0 = _mm_add_epi16(tmp0, row23);
+      partial[3][2] = (short)_mm_extract_epi16(tmp0, 0);
+      tmp0 = _mm_bsrli_si128(tmp0, 2);
+      tmp0 = _mm_add_epi16(tmp0, row01);
+      extend = _mm_cmplt_epi16(tmp0, _mm_setzero_si128());
+      _mm_storeu_si128((__m128i *)(partial[3]+3),
+       _mm_unpacklo_epi16(tmp0, extend));
+      _mm_storeu_si128((__m128i *)(partial[3]+7),
+       _mm_unpackhi_epi16(tmp0, extend));
+    }
+  }
+  /*1,2,3 transpose???*/
+#if 0
   for (i = 0; i < 8; i++) {
     int j;
     for (j = 0; j < 8; j++) {
       int x;
       x = img[i*stride + j] >> OD_COEFF_SHIFT;
-      partial[0][i + j] += x;
+      /*partial[0][i + j] += x;*/
+      /*if (i/2 + j == 3 && count == 0)
+	printf("%i\n", x);*/
       partial[1][i + j/2] += x;
-      partial[2][i] += x;
+      /*partial[2][i] += x;*/
       partial[3][3 + i - j/2] += x;
-      partial[4][7 + i - j] += x;
-      partial[5][3 - i/2 + j] += x;
-      partial[6][j] += x;
-      partial[7][i/2 + j] += x;
+      /*partial[4][7 + i - j] += x;*/
+      /*partial[5][3 - i/2 + j] += x;*/
+      /*partial[6][j] += x;*/
+      /*partial[7][i/2 + j] += x;*/
     }
   }
+#endif
+  /*if (count == 0) {
+    printf("%i %i\n", partial[7][3]);
+    count++;
+  }*/
   for (i = 0; i < 8; i++) {
     cost[2] += partial[2][i]*partial[2][i] >> 3;
     cost[6] += partial[6][i]*partial[6][i] >> 3;
@@ -1804,13 +2081,19 @@ void od_dering(od_state *state, int16_t *y, int ystride, int16_t *x, int xstride
   /* We avoid filtering the pixels for which some of the pixels to average
      are outside the frame. We could change the filter instead, but it would
      add special cases for any future vectorization. */
-  for (i = 0; i < OD_DERING_INBUF_SIZE; i++) inbuf[i] = OD_DERING_VERY_LARGE;
+  if (sby == 0 || sby == nvsb - 1 || sbx == 0 || sbx == nvsb - 1)
+    for (i = 0; i < OD_DERING_INBUF_SIZE; i++) inbuf[i] = OD_DERING_VERY_LARGE;
   for (i = -OD_FILT_BORDER*(sby != 0); i < n
    + OD_FILT_BORDER*(sby != nvsb - 1); i++) {
-    for (j = -OD_FILT_BORDER*(sbx != 0); j < n
+    int start_offset;
+    start_offset = -OD_FILT_BORDER*(sbx != 0);
+    OD_COPY(in + i*OD_FILT_BSTRIDE + start_offset,
+     x + i*xstride + start_offset,
+     n + OD_FILT_BORDER*(sbx != nhsb - 1) - start_offset);
+    /*for (j = -OD_FILT_BORDER*(sbx != 0); j < n
      + OD_FILT_BORDER*(sbx != nhsb - 1); j++) {
       in[i*OD_FILT_BSTRIDE + j] = x[i*xstride + j];
-    }
+    }*/
   }
   /* The threshold is meant to be the estimated amount of ringing for a given
      quantizer. Ringing is mostly proportional to the quantizer, but we
@@ -1870,9 +2153,10 @@ void od_dering(od_state *state, int16_t *y, int ystride, int16_t *x, int xstride
     }
   }
   for (i = 0; i < n; i++) {
-    for (j = 0; j < n; j++) {
+    OD_COPY(in + i*OD_FILT_BSTRIDE, y + i*ystride, n);
+    /*for (j = 0; j < n; j++) {
       in[i*OD_FILT_BSTRIDE + j] = y[i*ystride + j];
-    }
+    }*/
   }
   for (by = 0; by < nvb; by++) {
     for (bx = 0; bx < nhb; bx++) {
