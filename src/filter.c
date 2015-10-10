@@ -1616,8 +1616,6 @@ void od_apply_postfilter_frame_sbs(od_coeff *c0, int stride, int nhsb,
 #include <stdio.h>
 #include "x86/x86int.h"
 
-static int count = 0;
-
 void print128_num16(__m128i var) {
   int16_t *val = (int16_t*) &var;
   printf("Numerical: %i %i %i %i %i %i %i %i \n", 
@@ -1672,6 +1670,33 @@ OD_SIMD_INLINE void od_transpose16x8(__m128i *t0, __m128i *t1,
   *t7 = _mm_unpackhi_epi64(g1, h1);
 }
 
+OD_SIMD_INLINE void od_extend(__m128i* out0, __m128i* out1, __m128i in)
+{
+  __m128i extend;
+  extend = _mm_cmplt_epi16(in, _mm_setzero_si128());
+  *out0 = _mm_unpacklo_epi16(in, extend);
+  *out1 = _mm_unpackhi_epi16(in, extend);
+}
+
+OD_SIMD_INLINE void od_extend_store(int* ptr, __m128i vec)
+{
+  __m128i a;
+  __m128i b;
+  od_extend(&a, &b, vec);
+  _mm_store_si128((__m128i *)(ptr+0), a);
+  _mm_store_si128((__m128i *)(ptr+4), b);
+}
+
+OD_SIMD_INLINE void od_extend_storeu(int* ptr, __m128i vec)
+{
+  __m128i a;
+  __m128i b;
+  od_extend(&a, &b, vec);
+  _mm_storeu_si128((__m128i *)(ptr+0), a);
+  _mm_storeu_si128((__m128i *)(ptr+4), b);
+}
+
+
 /* Detect direction. 0 means 45-degree up-right, 2 is horizontal, and so on.
    The search minimizes the weighted variance along all the lines in a
    particular direction, i.e. the squared error between the input and a
@@ -1690,8 +1715,6 @@ static int od_dir_find8(const int16_t *img, int stride, int32_t *var) {
     __m128i tmp0;
     __m128i tmp1;
     __m128i tmp2;
-    __m128i tmp3;
-    __m128i tmp4;
     __m128i row0;
     __m128i row1;
     __m128i row2;
@@ -1732,11 +1755,7 @@ static int od_dir_find8(const int16_t *img, int stride, int32_t *var) {
     tmp1 = _mm_bslli_si128(row7, 14);
     tmp0 = _mm_add_epi16(tmp0, tmp2);
     tmp0 = _mm_add_epi16(tmp0, tmp1);
-    extend = _mm_cmplt_epi16(tmp0, _mm_setzero_si128());
-    _mm_store_si128((__m128i *)(partial[0]+0),
-     _mm_unpacklo_epi16(tmp0, extend));
-    _mm_store_si128((__m128i *)(partial[0]+4),
-     _mm_unpackhi_epi16(tmp0, extend));
+    od_extend_store(partial[0], tmp0);
     tmp0 = _mm_bsrli_si128(row7, 2);
     tmp1 = _mm_bsrli_si128(row6, 4);
     tmp2 = _mm_bsrli_si128(row5, 6);
@@ -1750,11 +1769,7 @@ static int od_dir_find8(const int16_t *img, int stride, int32_t *var) {
     tmp2 = _mm_bsrli_si128(row1, 14);
     tmp0 = _mm_add_epi16(tmp0, tmp1);
     tmp0 = _mm_add_epi16(tmp0, tmp2);
-    extend = _mm_cmplt_epi16(tmp0, _mm_setzero_si128());
-    _mm_store_si128((__m128i *)(partial[0]+8),
-     _mm_unpacklo_epi16(tmp0, extend));
-    _mm_store_si128((__m128i *)(partial[0]+12),
-     _mm_unpackhi_epi16(tmp0, extend));
+    od_extend_store(partial[0]+8, tmp0);
     /*partial[4][7 + i - j] += x;*/
     tmp0 = _mm_bslli_si128(row6, 2);
     tmp1 = _mm_bslli_si128(row5, 4);
@@ -1770,11 +1785,7 @@ static int od_dir_find8(const int16_t *img, int stride, int32_t *var) {
     tmp1 = _mm_bslli_si128(row0, 14);
     tmp0 = _mm_add_epi16(tmp0, tmp2);
     tmp0 = _mm_add_epi16(tmp0, tmp1);
-    extend = _mm_cmplt_epi16(tmp0, _mm_setzero_si128());
-    _mm_store_si128((__m128i *)(partial[4]+0),
-     _mm_unpacklo_epi16(tmp0, extend));
-    _mm_store_si128((__m128i *)(partial[4]+4),
-     _mm_unpackhi_epi16(tmp0, extend));
+    od_extend_store(partial[4], tmp0);
     tmp0 = _mm_bsrli_si128(row0, 2);
     tmp1 = _mm_bsrli_si128(row1, 4);
     tmp2 = _mm_bsrli_si128(row2, 6);
@@ -1788,11 +1799,7 @@ static int od_dir_find8(const int16_t *img, int stride, int32_t *var) {
     tmp2 = _mm_bsrli_si128(row6, 14);
     tmp0 = _mm_add_epi16(tmp0, tmp1);
     tmp0 = _mm_add_epi16(tmp0, tmp2);
-    extend = _mm_cmplt_epi16(tmp0, _mm_setzero_si128());
-    _mm_store_si128((__m128i *)(partial[4]+8),
-     _mm_unpacklo_epi16(tmp0, extend));
-    _mm_store_si128((__m128i *)(partial[4]+12),
-     _mm_unpackhi_epi16(tmp0, extend));
+    od_extend_store(partial[4]+8, tmp0);
     {
       __m128i row01;
       __m128i row23;
@@ -1806,11 +1813,7 @@ static int od_dir_find8(const int16_t *img, int stride, int32_t *var) {
       tmp0 = _mm_add_epi16(row01, row23);
       tmp1 = _mm_add_epi16(row45, row67);
       tmp0 = _mm_add_epi16(tmp0, tmp1);
-      extend = _mm_cmplt_epi16(tmp0, _mm_setzero_si128());
-      _mm_store_si128((__m128i *)(partial[6]+0),
-       _mm_unpacklo_epi16(tmp0, extend));
-      _mm_store_si128((__m128i *)(partial[6]+4),
-       _mm_unpackhi_epi16(tmp0, extend));
+      od_extend_store(partial[6], tmp0);
       /*partial[7][i/2 + j] += x;*/
       partial[7][0] = (short)_mm_extract_epi16(row01, 0);
       tmp0 = _mm_bsrli_si128(row01, 2);
@@ -1821,11 +1824,7 @@ static int od_dir_find8(const int16_t *img, int stride, int32_t *var) {
       partial[7][2] = (short)_mm_extract_epi16(tmp0, 0);
       tmp0 = _mm_bsrli_si128(tmp0, 2);
       tmp0 = _mm_add_epi16(tmp0, row67);
-      extend = _mm_cmplt_epi16(tmp0, _mm_setzero_si128());
-      _mm_storeu_si128((__m128i *)(partial[7]+3),
-       _mm_unpacklo_epi16(tmp0, extend));
-      _mm_storeu_si128((__m128i *)(partial[7]+7),
-       _mm_unpackhi_epi16(tmp0, extend));
+      od_extend_storeu(partial[7]+3, tmp0);
       /*partial[5][3 - i/2 + j] += x;*/
       partial[5][0] = (short)_mm_extract_epi16(row67, 0);
       tmp0 = _mm_bsrli_si128(row67, 2);
@@ -1836,13 +1835,10 @@ static int od_dir_find8(const int16_t *img, int stride, int32_t *var) {
       partial[5][2] = (short)_mm_extract_epi16(tmp0, 0);
       tmp0 = _mm_bsrli_si128(tmp0, 2);
       tmp0 = _mm_add_epi16(tmp0, row01);
-      extend = _mm_cmplt_epi16(tmp0, _mm_setzero_si128());
-      _mm_storeu_si128((__m128i *)(partial[5]+3),
-       _mm_unpacklo_epi16(tmp0, extend));
-      _mm_storeu_si128((__m128i *)(partial[5]+7),
-       _mm_unpackhi_epi16(tmp0, extend));
+      od_extend_storeu(partial[5]+3, tmp0);
     }
     od_transpose16x8(&row0, &row1, &row2, &row3, &row4, &row5, &row6, &row7);
+    /*rows are columns now.*/
     {
       __m128i row01;
       __m128i row23;
@@ -1893,7 +1889,7 @@ static int od_dir_find8(const int16_t *img, int stride, int32_t *var) {
        _mm_unpackhi_epi16(tmp0, extend));
     }
   }
-  /*1,2,3 transpose???*/
+#define M(__in) (__in*__in)
 #if 0
   for (i = 0; i < 8; i++) {
     int j;
@@ -1917,9 +1913,16 @@ static int od_dir_find8(const int16_t *img, int stride, int32_t *var) {
     printf("%i %i\n", partial[7][3]);
     count++;
   }*/
+  /*{
+    __m128i partial2;
+    __m128i partial6;
+    partial2 = _mm_load_si128((__m128i *)(partial[2]));
+    partial6 = _mm_load_si128((__m128i *)(partial[6]));
+    
+  }*/
   for (i = 0; i < 8; i++) {
-    cost[2] += partial[2][i]*partial[2][i] >> 3;
-    cost[6] += partial[6][i]*partial[6][i] >> 3;
+    cost[2] += M(partial[2][i]) >> 3;
+    cost[6] += M(partial[6][i]) >> 3;
   }
   for (i = 0; i < 7; i++) {
     cost[0] += OD_DIVU_SMALL(partial[0][i]*partial[0][i], i + 1)
@@ -1934,10 +1937,37 @@ static int od_dir_find8(const int16_t *img, int stride, int32_t *var) {
     for (j = 0; j < 4 + 1; j++) {
       cost[i] += partial[i][3 + j]*partial[i][3 + j] >> 3;
     }
+#if 1
+    #define LOOP_BODY(index) j = index; \
+    { \
+      int a; \
+      int b; \
+      int divisor; \
+      a = partial[i][j]*partial[i][j]; \
+      b = partial[i][10 - j]*partial[i][10 - j]; \
+      divisor = 2*j + 2; \
+      if (divisor == 2) { \
+        a >>= 1; \
+        b >>= 1; \
+      } else if (divisor == 4) { \
+        a >>= 2; \
+        b >>= 2; \
+      } else { \
+        a = OD_DIVU_SMALL(a, divisor); \
+	b = OD_DIVU_SMALL(b, divisor); \
+      } \
+      cost[i] += a + b; \
+    }
+    LOOP_BODY(0)
+    LOOP_BODY(1)
+    LOOP_BODY(2)
+    #undef LOOP_BODY
+#else
     for (j = 0; j < 4 - 1; j++) {
       cost[i] += OD_DIVU_SMALL(partial[i][j]*partial[i][j], 2*j + 2)
        + OD_DIVU_SMALL(partial[i][10 - j]*partial[i][10 - j], 2*j + 2);
     }
+#endif
   }
   for (i = 0; i < 8; i++) {
     if (cost[i] > best_cost) {
