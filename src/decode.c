@@ -1046,7 +1046,7 @@ static void od_decode_coefficients(od_dec_ctx *dec, od_mb_dec_ctx *mbctx) {
          state->adapt.clpf_increment, "clp");
         state->dering_flags[sby*nhsb + sbx] = filtered;
         if (filtered) {
-        /*if (1) {*/
+        /*if (0) {*/
           for (pli = 0; pli < nplanes; pli++) {
             int16_t buf[OD_BSIZE_MAX*OD_BSIZE_MAX];
             od_coeff *output;

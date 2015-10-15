@@ -1670,16 +1670,25 @@ OD_SIMD_INLINE void od_transpose16x8(__m128i *t0, __m128i *t1,
   *t7 = _mm_unpackhi_epi64(g1, h1);
 }
 
-OD_SIMD_INLINE void od_extend(__m128i* out0, __m128i* out1, __m128i in)
-{
+#define __MMM 0
+
+OD_SIMD_INLINE void od_extend(__m128i* out0, __m128i* out1, __m128i in) {
+#if __MMM == 1
   __m128i extend;
   extend = _mm_cmplt_epi16(in, _mm_setzero_si128());
   *out0 = _mm_unpacklo_epi16(in, extend);
   *out1 = _mm_unpackhi_epi16(in, extend);
+#else
+  __m128i lo;
+  __m128i hi;
+  lo = _mm_mullo_epi16(in, in);
+  hi = _mm_mulhi_epi16(in, in);
+  *out0 = _mm_unpacklo_epi16(lo, hi);
+  *out1 = _mm_unpackhi_epi16(lo, hi);
+#endif
 }
 
-OD_SIMD_INLINE void od_extend_store(int* ptr, __m128i vec)
-{
+OD_SIMD_INLINE void od_extend_store(int* ptr, __m128i vec) {
   __m128i a;
   __m128i b;
   od_extend(&a, &b, vec);
@@ -1687,8 +1696,7 @@ OD_SIMD_INLINE void od_extend_store(int* ptr, __m128i vec)
   _mm_store_si128((__m128i *)(ptr+4), b);
 }
 
-OD_SIMD_INLINE void od_extend_storeu(int* ptr, __m128i vec)
-{
+OD_SIMD_INLINE void od_extend_storeu(int* ptr, __m128i vec) {
   __m128i a;
   __m128i b;
   od_extend(&a, &b, vec);
@@ -1696,6 +1704,17 @@ OD_SIMD_INLINE void od_extend_storeu(int* ptr, __m128i vec)
   _mm_storeu_si128((__m128i *)(ptr+4), b);
 }
 
+OD_SIMD_INLINE int od_extend1(__m128i vec) {
+#if __MMM == 1
+  return (short)_mm_extract_epi16(vec, 0);
+#else
+  int x;
+  x = (short)_mm_extract_epi16(vec, 0);
+  return x*x;
+#endif
+}
+
+static int count = 0;
 
 /* Detect direction. 0 means 45-degree up-right, 2 is horizontal, and so on.
    The search minimizes the weighted variance along all the lines in a
@@ -1704,14 +1723,13 @@ OD_SIMD_INLINE void od_extend_storeu(int* ptr, __m128i vec)
    in a particular direction. Since each direction have the same sum(x^2) term,
    that term is never computed. See Section 2, step 2, of:
    http://jmvalin.ca/notes/intra_paint.pdf */
-static int od_dir_find8(const int16_t *img, int stride, int32_t *var) {
+int od_dir_find8(const int16_t *img, int stride, int32_t *var) {
   int i;
   int cost[8] = {0};
   int partial[8][15+1]/* = {{0}}*/;
   int best_cost = 0;
   int best_dir = 0;
   {
-    __m128i extend; 
     __m128i tmp0;
     __m128i tmp1;
     __m128i tmp2;
@@ -1815,24 +1833,24 @@ static int od_dir_find8(const int16_t *img, int stride, int32_t *var) {
       tmp0 = _mm_add_epi16(tmp0, tmp1);
       od_extend_store(partial[6], tmp0);
       /*partial[7][i/2 + j] += x;*/
-      partial[7][0] = (short)_mm_extract_epi16(row01, 0);
+      partial[7][0] = od_extend1(row01);
       tmp0 = _mm_bsrli_si128(row01, 2);
       tmp0 = _mm_add_epi16(tmp0, row23);
-      partial[7][1] = (short)_mm_extract_epi16(tmp0, 0);
+      partial[7][1] = od_extend1(tmp0);
       tmp0 = _mm_bsrli_si128(tmp0, 2);
       tmp0 = _mm_add_epi16(tmp0, row45);
-      partial[7][2] = (short)_mm_extract_epi16(tmp0, 0);
+      partial[7][2] = od_extend1(tmp0);
       tmp0 = _mm_bsrli_si128(tmp0, 2);
       tmp0 = _mm_add_epi16(tmp0, row67);
       od_extend_storeu(partial[7]+3, tmp0);
       /*partial[5][3 - i/2 + j] += x;*/
-      partial[5][0] = (short)_mm_extract_epi16(row67, 0);
+      partial[5][0] = od_extend1(row67);
       tmp0 = _mm_bsrli_si128(row67, 2);
       tmp0 = _mm_add_epi16(tmp0, row45);
-      partial[5][1] = (short)_mm_extract_epi16(tmp0, 0);
+      partial[5][1] = od_extend1(tmp0);
       tmp0 = _mm_bsrli_si128(tmp0, 2);
       tmp0 = _mm_add_epi16(tmp0, row23);
-      partial[5][2] = (short)_mm_extract_epi16(tmp0, 0);
+      partial[5][2] = od_extend1(tmp0);
       tmp0 = _mm_bsrli_si128(tmp0, 2);
       tmp0 = _mm_add_epi16(tmp0, row01);
       od_extend_storeu(partial[5]+3, tmp0);
@@ -1852,44 +1870,36 @@ static int od_dir_find8(const int16_t *img, int stride, int32_t *var) {
       tmp0 = _mm_add_epi16(row01, row23);
       tmp1 = _mm_add_epi16(row45, row67);
       tmp0 = _mm_add_epi16(tmp0, tmp1);
-      extend = _mm_cmplt_epi16(tmp0, _mm_setzero_si128());
-      _mm_store_si128((__m128i *)(partial[2]+0),
-       _mm_unpacklo_epi16(tmp0, extend));
-      _mm_store_si128((__m128i *)(partial[2]+4),
-       _mm_unpackhi_epi16(tmp0, extend));
+      od_extend_store(partial[2], tmp0);
       /*partial[7][i/2 + j] += x;*/
-      partial[1][0] = (short)_mm_extract_epi16(row01, 0);
+      partial[1][0] = od_extend1(row01);
       tmp0 = _mm_bsrli_si128(row01, 2);
       tmp0 = _mm_add_epi16(tmp0, row23);
-      partial[1][1] = (short)_mm_extract_epi16(tmp0, 0);
+      partial[1][1] = od_extend1(tmp0);
       tmp0 = _mm_bsrli_si128(tmp0, 2);
       tmp0 = _mm_add_epi16(tmp0, row45);
-      partial[1][2] = (short)_mm_extract_epi16(tmp0, 0);
+      partial[1][2] = od_extend1(tmp0);
       tmp0 = _mm_bsrli_si128(tmp0, 2);
       tmp0 = _mm_add_epi16(tmp0, row67);
-      extend = _mm_cmplt_epi16(tmp0, _mm_setzero_si128());
-      _mm_storeu_si128((__m128i *)(partial[1]+3),
-       _mm_unpacklo_epi16(tmp0, extend));
-      _mm_storeu_si128((__m128i *)(partial[1]+7),
-       _mm_unpackhi_epi16(tmp0, extend));
+      od_extend_storeu(partial[1]+3, tmp0);
       /*partial[5][3 - i/2 + j] += x;*/
-      partial[3][0] = (short)_mm_extract_epi16(row67, 0);
+      partial[3][0] = od_extend1(row67);
       tmp0 = _mm_bsrli_si128(row67, 2);
       tmp0 = _mm_add_epi16(tmp0, row45);
-      partial[3][1] = (short)_mm_extract_epi16(tmp0, 0);
+      partial[3][1] = od_extend1(tmp0);
       tmp0 = _mm_bsrli_si128(tmp0, 2);
       tmp0 = _mm_add_epi16(tmp0, row23);
-      partial[3][2] = (short)_mm_extract_epi16(tmp0, 0);
+      partial[3][2] = od_extend1(tmp0);
       tmp0 = _mm_bsrli_si128(tmp0, 2);
       tmp0 = _mm_add_epi16(tmp0, row01);
-      extend = _mm_cmplt_epi16(tmp0, _mm_setzero_si128());
-      _mm_storeu_si128((__m128i *)(partial[3]+3),
-       _mm_unpacklo_epi16(tmp0, extend));
-      _mm_storeu_si128((__m128i *)(partial[3]+7),
-       _mm_unpackhi_epi16(tmp0, extend));
+      od_extend_storeu(partial[3]+3, tmp0);
     }
   }
+#if __MMM == 1
 #define M(__in) (__in*__in)
+#else
+#define M(__in) (__in)
+#endif
 #if 0
   for (i = 0; i < 8; i++) {
     int j;
@@ -1913,38 +1923,249 @@ static int od_dir_find8(const int16_t *img, int stride, int32_t *var) {
     printf("%i %i\n", partial[7][3]);
     count++;
   }*/
-  /*{
-    __m128i partial2;
-    __m128i partial6;
-    partial2 = _mm_load_si128((__m128i *)(partial[2]));
-    partial6 = _mm_load_si128((__m128i *)(partial[6]));
-    
-  }*/
+#if 1
+  {
+    __m128i cost_vec;
+    __m128i tmp0;
+    __m128i tmp1;
+    tmp0 = _mm_load_si128((__m128i *)(partial[2]));
+    tmp0 = _mm_srli_epi32(tmp0, 3);
+    tmp1 = _mm_load_si128((__m128i *)(partial[2]+4));
+    tmp1 = _mm_srli_epi32(tmp1, 3);
+    cost_vec = _mm_add_epi32(tmp0, tmp1);
+    cost_vec = _mm_add_epi32(cost_vec, _mm_srli_si128(cost_vec, 8));
+    cost_vec = _mm_add_epi32(cost_vec, _mm_srli_si128(cost_vec, 4));
+    cost[2] = _mm_cvtsi128_si32(cost_vec);
+    tmp0 = _mm_load_si128((__m128i *)(partial[6]));
+    tmp0 = _mm_srli_epi32(tmp0, 3);
+    tmp1 = _mm_load_si128((__m128i *)(partial[6]+4));
+    tmp1 = _mm_srli_epi32(tmp1, 3);
+    cost_vec = _mm_add_epi32(tmp0, tmp1);
+    cost_vec = _mm_add_epi32(cost_vec, _mm_srli_si128(cost_vec, 8));
+    cost_vec = _mm_add_epi32(cost_vec, _mm_srli_si128(cost_vec, 4));
+    cost[6] = _mm_cvtsi128_si32(cost_vec);
+    /*sums = _mm_add_epi32(sums, _mm_srli_si128(sums, 8));
+    sums = _mm_add_epi32(sums, _mm_srli_si128(sums, 4));*/
+    /*tmp0 = _mm_unpacklo_epi32(partial2, partial6);
+    tmp1 = _mm_unpackhi_epi32(partial2, partial6);
+    tmp0 = _mm_add_epi32(tmp0, tmp1);
+    tmp1 = _mm_bsrli_si128(tmp0, 8);
+    tmp0 = _mm_add_epi32(tmp0, tmp1);
+    cost[2] = _mm_cvtsi128_si32(tmp0);
+    tmp0 = _mm_bsrli_si128(tmp0, 4);
+    cost[6] = _mm_cvtsi128_si32(tmp0);*/
+  }
+#else
   for (i = 0; i < 8; i++) {
     cost[2] += M(partial[2][i]) >> 3;
     cost[6] += M(partial[6][i]) >> 3;
   }
-  for (i = 0; i < 7; i++) {
-    cost[0] += OD_DIVU_SMALL(partial[0][i]*partial[0][i], i + 1)
-     + OD_DIVU_SMALL(partial[0][14 - i]*partial[0][14 - i], i + 1);
-    cost[4] += OD_DIVU_SMALL(partial[4][i]*partial[4][i], i + 1)
-     + OD_DIVU_SMALL(partial[4][14 - i]*partial[4][14 - i], i + 1);
+#endif
+  /*
+uint32_t OD_DIVU_SMALL_CONSTS[OD_DIVU_DMAX][2] = {
+1 { 0xFFFFFFFF, 0xFFFFFFFF },
+2 { 0xFFFFFFFF, 0xFFFFFFFF },
+3 { 0xAAAAAAAB,         0 },
+4 { 0xFFFFFFFF, 0xFFFFFFFF },
+5 { 0xCCCCCCCD,         0 },
+6 { 0xAAAAAAAB,         0 },
+7 { 0x92492492, 0x92492492 },
+8 { 0xFFFFFFFF, 0xFFFFFFFF },
+# define OD_DIVU_SMALL(_x, _d) \
+  ((uint32_t)((OD_DIVU_SMALL_CONSTS[(_d)-1][0]* \
+  (unsigned long long)(_x)+OD_DIVU_SMALL_CONSTS[(_d)-1][1])>>32)>> \
+  (OD_ILOG(_d)-1))*/
+  {
+    __m128i div_mul5 = _mm_set_epi32(0, 0xCCCCCCCD, 0, 0xCCCCCCCD);
+    __m128i div_mul3 = _mm_set_epi32(0, 0xAAAAAAAB, 0, 0xAAAAAAAB);
+    __m128i div_mul7 = _mm_set_epi32(0, 0x92492492, 0, 0x92492492);
+    __m128i div_add7 = _mm_set_epi64x(0x92492492, 0x92492492);
+    /*__m128i div_shift_1 = _mm_set_epi64x(32+1, 32+1);
+    __m128i div_shift_2 = _mm_set_epi64x(32+2, 32+2);*/
+    /*__m128i shift12 = _mm_set_epi32(1, 1, 0, 0);
+    __m128i shift48 = _mm_set_epi32(3, 3, 2, 2);*/
+    __m128i sum;
+    __m128i tmp0;
+    __m128i tmp1;
+    __m128i tmp2;
+    __m128i tmp3;
+    __m128i tmp4;
+    tmp0 = _mm_load_si128((__m128i *)(partial[0]));
+    tmp1 = _mm_load_si128((__m128i *)(partial[4]));
+    /*tmp0 = _mm_set_epi32(4*4, 3, 2*2, 1);
+    tmp1 = _mm_set_epi32(14*4, 13, 12*2, 11);*/
+    /*1122*/
+    tmp2 = _mm_unpacklo_epi32(tmp0, tmp1);
+    /*3344*/
+    tmp1 = _mm_unpackhi_epi32(tmp0, tmp1);
+    tmp0 = tmp2;
+    tmp2 = _mm_load_si128((__m128i *)(partial[0]+4));
+    tmp3 = _mm_load_si128((__m128i *)(partial[4]+4));
+    /*tmp2 = _mm_set_epi32(8*8, 7, 6, 5);
+    tmp3 = _mm_set_epi32(18*8, 17, 16, 15);*/
+    /*5566*/
+    tmp4 = _mm_unpacklo_epi32(tmp2, tmp3);
+    /*5656*/
+    tmp4 = _mm_shuffle_epi32(tmp4, _MM_SHUFFLE(3, 1, 2, 0));
+    /*7788*/
+    tmp3 = _mm_unpackhi_epi32(tmp2, tmp3);
+    tmp2 = tmp4;
+    /*3737*/
+    tmp4 = _mm_unpacklo_epi32(tmp1, tmp3);
+    /*4488*/
+    tmp1 = _mm_unpackhi_epi64(tmp1, tmp3);
+    tmp3 = tmp4;
+    /* This idea would be good but I would need AVX2 instructions
+    tmp0 = _mm_srl_epi32(tmp0, shift12);
+    tmp1 = _mm_srl_epi32(tmp1, shift48);
+    tmp0 = _mm_add_epi32(tmp0, tmp1);
+    tmp1 = _mm_srli_si128(tmp0, 8);
+    tmp0 = _mm_add_epi32(tmp0, tmp1);
+    cost[0] += _mm_cvtsi128_si32(tmp0);
+    tmp0 = _mm_srli_si128(tmp0, 4);
+    cost[4] += _mm_cvtsi128_si32(tmp0);*/
+    tmp1 = _mm_srli_epi32(tmp1, 2);
+    /*1144*/
+    tmp4 = _mm_unpacklo_epi64(tmp0, tmp1);
+    /*2288*/
+    tmp1 = _mm_unpackhi_epi64(tmp0, tmp1);
+    tmp0 = tmp4;
+    tmp1 = _mm_srli_epi32(tmp1, 1);
+    tmp0 = _mm_add_epi32(tmp0, tmp1);
+    tmp1 = _mm_srli_si128(tmp0, 8);
+    sum = _mm_add_epi32(tmp0, tmp1);
+    /*5*/
+    tmp4 = _mm_mul_epu32(tmp2, div_mul5);
+    tmp4 = _mm_srli_epi64(tmp4, 32+2);
+    tmp4 = _mm_shuffle_epi32(tmp4, _MM_SHUFFLE(1, 1, 2, 0));
+    sum = _mm_add_epi32(sum, tmp4);
+    /*6*/
+    tmp2 = _mm_srli_si128(tmp2, 4);
+    tmp4 = _mm_mul_epu32(tmp2, div_mul3);
+    tmp4 = _mm_srli_epi64(tmp4, 32+2);
+    tmp4 = _mm_shuffle_epi32(tmp4, _MM_SHUFFLE(1, 1, 2, 0));
+    sum = _mm_add_epi32(sum, tmp4);
+    /*3*/
+    tmp4 = _mm_mul_epu32(tmp3, div_mul3);
+    tmp4 = _mm_srli_epi64(tmp4, 32+1);
+    tmp4 = _mm_shuffle_epi32(tmp4, _MM_SHUFFLE(1, 1, 2, 0));
+    sum = _mm_add_epi32(sum, tmp4);
+    /*7*/
+    tmp3 = _mm_srli_si128(tmp3, 4);
+    tmp4 = _mm_mul_epu32(tmp3, div_mul7);
+    tmp4 = _mm_add_epi64(tmp4, div_add7);
+    tmp4 = _mm_srli_epi64(tmp4, 32+2);
+    tmp4 = _mm_shuffle_epi32(tmp4, _MM_SHUFFLE(1, 1, 2, 0));
+    sum = _mm_add_epi32(sum, tmp4);
+    /*We can do this before squaring. shift si128 the shuffle the shift back*/
+    {
+      int swapA;
+      int swapB;
+      swapA = partial[0][11];
+      swapB = partial[0][12];
+      partial[0][12] = swapA;
+      partial[0][11] = swapB;
+      swapA = partial[4][11];
+      swapB = partial[4][12];
+      partial[4][12] = swapA;
+      partial[4][11] = swapB;
+    }
+#if 1
+    tmp0 = _mm_load_si128((__m128i *)(partial[0]+8));
+    tmp1 = _mm_load_si128((__m128i *)(partial[4]+8));
+    /*7766*/
+    tmp2 = _mm_unpacklo_epi32(tmp0, tmp1);
+    /*7676*/ 
+    tmp2 = _mm_shuffle_epi32(tmp2, _MM_SHUFFLE(3, 1, 2, 0));
+    /*5533*/
+    tmp1 = _mm_unpackhi_epi32(tmp0, tmp1);
+    /*5353*/
+    tmp1 = _mm_shuffle_epi32(tmp1, _MM_SHUFFLE(3, 1, 2, 0));
+    tmp0 = tmp2;
+    /*7*/
+    tmp4 = _mm_mul_epu32(tmp0, div_mul7);
+    tmp4 = _mm_add_epi64(tmp4, div_add7);
+    tmp4 = _mm_srli_epi64(tmp4, 32+2);
+    tmp4 = _mm_shuffle_epi32(tmp4, _MM_SHUFFLE(1, 1, 2, 0));
+    sum = _mm_add_epi32(sum, tmp4);
+    /*6*/
+    tmp0 = _mm_srli_si128(tmp0, 4);
+    tmp4 = _mm_mul_epu32(tmp0, div_mul3);
+    tmp4 = _mm_srli_epi64(tmp4, 32+2);
+    tmp4 = _mm_shuffle_epi32(tmp4, _MM_SHUFFLE(1, 1, 2, 0));
+    sum = _mm_add_epi32(sum, tmp4);
+    /*5*/
+    tmp4 = _mm_mul_epu32(tmp1, div_mul5);
+    tmp4 = _mm_srli_epi64(tmp4, 32+2);
+    tmp4 = _mm_shuffle_epi32(tmp4, _MM_SHUFFLE(1, 1, 2, 0));
+    sum = _mm_add_epi32(sum, tmp4);
+    /*3*/
+    tmp1 = _mm_srli_si128(tmp1, 4);
+    tmp4 = _mm_mul_epu32(tmp1, div_mul3);
+    tmp4 = _mm_srli_epi64(tmp4, 32+1);
+    tmp4 = _mm_shuffle_epi32(tmp4, _MM_SHUFFLE(1, 1, 2, 0));
+    sum = _mm_add_epi32(sum, tmp4);
+#endif
+    /*cost[0] = _mm_cvtsi128_si32(sum);
+    sum = _mm_srli_si128(sum, 4);
+    cost[4] = _mm_cvtsi128_si32(sum);*/
+    cost[0] = _mm_cvtsi128_si32(sum) + (partial[0][12] >> 2);
+    sum = _mm_srli_si128(sum, 4);
+    cost[4] = _mm_cvtsi128_si32(sum) + (partial[4][12] >> 2);
+    cost[0] += (partial[0][13] >> 1) + partial[0][14];
+    cost[4] += (partial[4][13] >> 1) + partial[4][14];
+    /*cost[0] += OD_DIVU_SMALL(M(partial[0][11]), 3);
+    cost[4] += OD_DIVU_SMALL(M(partial[4][11]), 3);*/
+    /*cost[0] += OD_DIVU_SMALL(M(partial[0][12]), 4);
+    cost[4] += OD_DIVU_SMALL(M(partial[4][12]), 4);
+    cost[0] += OD_DIVU_SMALL(M(partial[0][11]), 3);
+    cost[4] += OD_DIVU_SMALL(M(partial[4][11]), 3);*/
+    /*if (count == 0) {
+      tmp0 = _mm_srli_si128(tmp0, 4);
+      print128_num32(tmp2);
+      print128_num32(tmp4);
+      count++;
+    }*/
   }
-  cost[0] += partial[0][7]*partial[0][8 - 1] >> 3;
-  cost[4] += partial[4][7]*partial[4][8 - 1] >> 3;
+#if 0
+  for (i = 0; i < 7; i++) {
+    /*if (i+1 == 3 || i+1 == 4) continue;*/
+    if ((i&(i+1)) != 0 || i+1 == 4) {
+      continue;
+    }
+    cost[0] += OD_DIVU_SMALL(M(partial[0][14 - i]), i + 1);
+    cost[4] += OD_DIVU_SMALL(M(partial[4][14 - i]), i + 1);
+    /*cost[0] += OD_DIVU_SMALL(M(partial[0][i]), i + 1)
+     + OD_DIVU_SMALL(M(partial[0][14 - i]), i + 1);
+    cost[4] += OD_DIVU_SMALL(M(partial[4][i]), i + 1)
+     + OD_DIVU_SMALL(M(partial[4][14 - i]), i + 1);*/
+  }
+#endif
+  /*This will probably go with the above in assembly*/
+  /*cost[0] += M(partial[0][7]) >> 3;
+  cost[4] += M(partial[4][7]) >> 3;*/
   for (i = 1; i < 8; i += 2) {
     int j;
-    for (j = 0; j < 4 + 1; j++) {
-      cost[i] += partial[i][3 + j]*partial[i][3 + j] >> 3;
+    {
+      __m128i cost_vec;
+      /*Sum 4 to 8 up using vectors then add 3 regularly*/
+      cost_vec = _mm_load_si128((__m128i *)(partial[i]+4));
+      cost_vec = _mm_srli_epi32(cost_vec, 3);
+      cost_vec = _mm_add_epi32(cost_vec, _mm_srli_si128(cost_vec, 8));
+      cost_vec = _mm_add_epi32(cost_vec, _mm_srli_si128(cost_vec, 4));
+      cost[i] = (partial[i][3] >> 3) + _mm_cvtsi128_si32(cost_vec);
     }
+    /*for (j = 0; j < 4 + 1; j++) {
+      cost[i] += M(partial[i][3 + j]) >> 3;
+    }*/
 #if 1
     #define LOOP_BODY(index) j = index; \
     { \
       int a; \
       int b; \
       int divisor; \
-      a = partial[i][j]*partial[i][j]; \
-      b = partial[i][10 - j]*partial[i][10 - j]; \
+      a = M(partial[i][j]); \
+      b = M(partial[i][10 - j]); \
       divisor = 2*j + 2; \
       if (divisor == 2) { \
         a >>= 1; \
@@ -1969,12 +2190,52 @@ static int od_dir_find8(const int16_t *img, int stride, int32_t *var) {
     }
 #endif
   }
-  for (i = 0; i < 8; i++) {
+  {
+    __m128i dirs0;
+    __m128i dirs1;
+    __m128i costs0;
+    __m128i costs1;
+    __m128i cmp;
+    costs0 = _mm_load_si128((__m128i *)(cost)); 
+    costs1 = _mm_load_si128((__m128i *)(cost+4));
+    dirs0 = _mm_set_epi32(3, 2, 1, 0);
+    dirs1 = _mm_set_epi32(7, 6, 5, 4);
+    costs0 = _mm_slli_epi32(costs0, 3);
+    costs0 = _mm_add_epi32(costs0, _mm_set_epi32(4, 5, 6, 7));
+    costs1 = _mm_slli_epi32(costs1, 3);
+    costs1 = _mm_add_epi32(costs1, _mm_set_epi32(0, 1, 2, 3));
+    cmp = _mm_cmpgt_epi32(costs0, costs1);
+    costs0 = _mm_or_si128(_mm_and_si128(cmp, costs0),
+     _mm_andnot_si128(cmp, costs1));
+    dirs0 = _mm_or_si128(_mm_and_si128(cmp, dirs0),
+     _mm_andnot_si128(cmp, dirs1));
+    costs1 = _mm_srli_si128(costs0, 8);
+    dirs1 = _mm_srli_si128(dirs0, 8);
+    cmp = _mm_cmpgt_epi32(costs0, costs1);
+    costs0 = _mm_or_si128(_mm_and_si128(cmp, costs0),
+     _mm_andnot_si128(cmp, costs1));
+    dirs0 = _mm_or_si128(_mm_and_si128(cmp, dirs0),
+     _mm_andnot_si128(cmp, dirs1));
+    costs1 = _mm_srli_si128(costs0, 4);
+    dirs1 = _mm_srli_si128(dirs0, 4);
+    cmp = _mm_cmpgt_epi32(costs0, costs1);
+    costs0 = _mm_or_si128(_mm_and_si128(cmp, costs0),
+     _mm_andnot_si128(cmp, costs1));
+    dirs0 = _mm_or_si128(_mm_and_si128(cmp, dirs0),
+     _mm_andnot_si128(cmp, dirs1));
+    best_cost = _mm_cvtsi128_si32(costs0) >> 3;
+    best_dir = _mm_cvtsi128_si32(dirs0);
+    /*printf("START\n%i %i\n", best_dir, best_cost);*/
+    /*best_cost = 0;*/
+  }
+  /*for (i = 0; i < 8; i++) {
     if (cost[i] > best_cost) {
       best_cost = cost[i];
       best_dir = i;
     }
-  }
+  }*/
+  /*if (c != best_cost || d != best_dir)
+    printf("Error: %i %i\n%i %i\n%i\n", best_dir, best_cost, d, c, count);*/
   /* Difference between the optimal variance and the variance along the
      orthogonal direction. Again, the sum(x^2) terms cancel out. */
   *var = best_cost - cost[(best_dir + 4) & 7];
@@ -2104,6 +2365,7 @@ void od_dering(od_state *state, int16_t *y, int ystride, int16_t *x, int xstride
   int varsum = 0;
   int32_t var[OD_DERING_NBLOCKS][OD_DERING_NBLOCKS];
   int thresh[OD_DERING_NBLOCKS][OD_DERING_NBLOCKS];
+  __m128i very_large_vec;
   n = 1 << ln;
   bsize = 3 - xdec;
   nhb = nvb = n >> bsize;
@@ -2111,20 +2373,82 @@ void od_dering(od_state *state, int16_t *y, int ystride, int16_t *x, int xstride
   /* We avoid filtering the pixels for which some of the pixels to average
      are outside the frame. We could change the filter instead, but it would
      add special cases for any future vectorization. */
-  if (sby == 0 || sby == nvsb - 1 || sbx == 0 || sbx == nvsb - 1)
-    for (i = 0; i < OD_DERING_INBUF_SIZE; i++) inbuf[i] = OD_DERING_VERY_LARGE;
+  very_large_vec = _mm_set1_epi16(OD_DERING_VERY_LARGE);
+#define FASTER_FILL
+  if (sby == 0) {
+    for (i = -OD_FILT_BORDER; i < 0; i++) {
+      for (j = -OD_FILT_BORDER; j < n + OD_FILT_BORDER; j++) {
+        in[i*OD_FILT_BSTRIDE + j] = OD_DERING_VERY_LARGE;
+      }
+    }
+  }
+  if (sby == nvsb - 1) {
+    for (i = n; i < n + OD_FILT_BORDER; i++) {
+      for (j = -OD_FILT_BORDER; j < n + OD_FILT_BORDER; j++) {
+        in[i*OD_FILT_BSTRIDE + j] = OD_DERING_VERY_LARGE;
+      }
+    }
+  }
+  if (sbx == 0) {
+    for (i = -OD_FILT_BORDER; i < n + OD_FILT_BORDER; i++) {
+      _mm_storeu_si128((__m128i *)(in + i*OD_FILT_BSTRIDE - OD_FILT_BORDER),
+       very_large_vec);
+      /*for (j = -OD_FILT_BORDER; j < 0; j++) {
+        in[i*OD_FILT_BSTRIDE + j] = OD_DERING_VERY_LARGE;
+      }*/
+    }
+  }
+  if (sbx == nhsb - 1) {
+    for (i = -OD_FILT_BORDER; i < n + OD_FILT_BORDER; i++) {
+      _mm_storeu_si128((__m128i *)(in + i*OD_FILT_BSTRIDE + n),
+       very_large_vec);
+      /*for (j = n; j < n + OD_FILT_BORDER; j++) {
+        in[i*OD_FILT_BSTRIDE + j] = OD_DERING_VERY_LARGE;
+      }*/
+    }
+  }
   for (i = -OD_FILT_BORDER*(sby != 0); i < n
    + OD_FILT_BORDER*(sby != nvsb - 1); i++) {
+#if 1
     int start_offset;
     start_offset = -OD_FILT_BORDER*(sbx != 0);
     OD_COPY(in + i*OD_FILT_BSTRIDE + start_offset,
      x + i*xstride + start_offset,
      n + OD_FILT_BORDER*(sbx != nhsb - 1) - start_offset);
-    /*for (j = -OD_FILT_BORDER*(sbx != 0); j < n
+#else
+    for (j = -OD_FILT_BORDER*(sbx != 0); j < n
      + OD_FILT_BORDER*(sbx != nhsb - 1); j++) {
       in[i*OD_FILT_BSTRIDE + j] = x[i*xstride + j];
-    }*/
+    }
+#endif
   }
+  /*if (count == 0)
+  {
+    int16_t inbuf2[OD_DERING_INBUF_SIZE];
+    int16_t *in2;
+    in2 = inbuf2 + OD_FILT_BORDER*OD_FILT_BSTRIDE + OD_FILT_BORDER;
+    if (sby == 0) {
+      for (i = 0; i < OD_FILT_BORDER*OD_FILT_BSTRIDE; i++) inbuf2[i] = OD_DERING_VERY_LARGE;
+    }  
+    if (sby == nvsb - 1 || sbx == 0 || sbx == nvsb - 1) {
+      for (i = 0; i < OD_DERING_INBUF_SIZE; i++) inbuf2[i] = OD_DERING_VERY_LARGE;
+    }
+    for (i = -OD_FILT_BORDER*(sby != 0); i < n
+     + OD_FILT_BORDER*(sby != nvsb - 1); i++) {
+      int start_offset;
+      start_offset = -OD_FILT_BORDER*(sbx != 0);
+      OD_COPY(in2 + i*OD_FILT_BSTRIDE + start_offset,
+       x + i*xstride + start_offset,
+       n + OD_FILT_BORDER*(sbx != nhsb - 1) - start_offset);
+    }
+    for (i = 0; i < OD_DERING_INBUF_SIZE; i++) {
+      if (inbuf2[i] != inbuf[i]) {
+        printf("%i %i %i\n", i, inbuf[i], inbuf2[i]);
+        count++;
+      }
+    }
+    printf("%i\n", n);
+  }*/
   /* The threshold is meant to be the estimated amount of ringing for a given
      quantizer. Ringing is mostly proportional to the quantizer, but we
      use an exponent slightly smaller than unity because as quantization
@@ -2151,28 +2475,85 @@ void od_dering(od_state *state, int16_t *y, int ystride, int16_t *x, int xstride
       }
     }
   }
-  for (by = 0; by < nvb; by++) {
-    for (bx = 0; bx < nhb; bx++) {
-      int xstart;
-      int ystart;
-      int xend;
-      int yend;
-      int skip;
-      xstart = (sbx == 0) ? 0 : -1;
-      ystart = (sby == 0) ? 0 : -1;
-      xend = (2 >> xdec) + (sbx != nhsb - 1);
-      yend = (2 >> xdec) + (sby != nvsb - 1);
-      skip = 1;
-      /* We look at whether the current block and its 4x4 surrounding (due to
-         lapping) are skipped to avoid filtering the same content multiple
-         times. */
-      for (i = ystart; i < yend; i++) {
-        for (j = xstart; j < xend; j++) {
-          skip = skip && bskip[((by << 1 >> xdec) + i)*skip_stride
-           + (bx << 1 >> xdec) + j];
+  if (sbx == 0 || sby == 0 || sbx == nhsb - 1 || sby == nvsb - 1 ||
+   xdec > 1) {
+    int xstart;
+    int ystart;
+    int xend;
+    int yend;
+    xstart = (sbx == 0) ? 0 : -1;
+    ystart = (sby == 0) ? 0 : -1;
+    xend = (2 >> xdec) + (sbx != nhsb - 1);
+    yend = (2 >> xdec) + (sby != nvsb - 1);
+    for (by = 0; by < nvb; by++) {
+      for (bx = 0; bx < nhb; bx++) {
+        int skip;
+        skip = 1;
+        /* We look at whether the current block and its 4x4 surrounding (due to
+           lapping) are skipped to avoid filtering the same content multiple
+           times. */
+        for (i = ystart; i < yend; i++) {
+          for (j = xstart; j < xend; j++) {
+            skip = skip && bskip[((by << 1 >> xdec) + i)*skip_stride
+             + (bx << 1 >> xdec) + j];
+          }
         }
+        if (skip) thresh[by][bx] = 0;
       }
-      if (skip) thresh[by][bx] = 0;
+    }
+  }
+  else if (xdec == 1) {
+    for (by = 0; by < nvb; by++) {
+      for (bx = 0; bx < nhb; bx++) {
+        int skip;
+        uint32_t mask;
+        skip = 1;
+        mask = 0xFFFFFF;
+        /* We look at whether the current block and its 4x4 surrounding (due to
+           lapping) are skipped to avoid filtering the same content multiple
+           times. */
+        for (i = -1; i < 2; i++) {
+          mask &= *((uint32_t *)(bskip + (by + i)*skip_stride + bx - 1));
+          /*for (j = -1; j < 2; j++) {
+            skip = skip && bskip[(by + i)*skip_stride + bx + j];
+          }*/
+        }
+        mask &= mask >> 8;
+        mask &= mask >> 8;
+        skip = mask;
+        if (skip) thresh[by][bx] = 0;
+      }
+    }
+  }
+  else if(xdec == 0) {
+    for (by = 0; by < nvb; by++) {
+      for (bx = 0; bx < nhb; bx++) {
+        int skip;
+        uint32_t mask;
+        skip = 1;
+        mask = 0xFFFFFFFF;
+        /* We look at whether the current block and its 4x4 surrounding (due to
+           lapping) are skipped to avoid filtering the same content multiple
+           times. */
+#if 1
+        for (i = -1; i < 3; i++) {
+          /*for (j = -1; j < 3; j++) {
+            skip = skip && bskip[((by << 1 >> xdec) + i)*skip_stride
+             + (bx << 1 >> xdec) + j];
+          }*/
+          mask &= *((uint32_t *)(bskip + ((by << 1) + i)*skip_stride + (bx << 1) - 1));
+        }
+#else
+        mask &= *((uint32_t *)(bskip + ((by << 1) + -1)*skip_stride + (bx << 1) - 1));
+        mask &= *((uint32_t *)(bskip + ((by << 1) + 0)*skip_stride + (bx << 1) - 1));
+        mask &= *((uint32_t *)(bskip + ((by << 1) + 1)*skip_stride + (bx << 1) - 1));
+        mask &= *((uint32_t *)(bskip + ((by << 1) + 2)*skip_stride + (bx << 1) - 1));
+#endif
+        mask &= mask >> 16;
+        mask &= mask >> 8;
+        skip = mask;
+        if (skip) thresh[by][bx] = 0;
+      }
     }
   }
   for (by = 0; by < nvb; by++) {
@@ -2182,18 +2563,25 @@ void od_dering(od_state *state, int16_t *y, int ystride, int16_t *x, int xstride
        bsize, thresh[by][bx], dir[by][bx]);
     }
   }
+  /*This copy can probably be removed by looping differently for
+     different directions.*/
   for (i = 0; i < n; i++) {
+#if 1
     OD_COPY(in + i*OD_FILT_BSTRIDE, y + i*ystride, n);
-    /*for (j = 0; j < n; j++) {
+#else
+    for (j = 0; j < n; j++) {
       in[i*OD_FILT_BSTRIDE + j] = y[i*ystride + j];
-    }*/
+    }
+#endif
   }
   for (by = 0; by < nvb; by++) {
     for (bx = 0; bx < nhb; bx++) {
-      (*state->opt_vtbl.filter_dering_orthogonal)(&y[(by*ystride << bsize) + (bx << bsize)], ystride,
-       &in[(by*OD_FILT_BSTRIDE << bsize) + (bx << bsize)],
-       &x[(by*xstride << bsize) + (bx << bsize)], xstride, bsize,
-       thresh[by][bx], dir[by][bx]);
+      if (thresh[by][bx] != 0) {
+        (*state->opt_vtbl.filter_dering_orthogonal)(&y[(by*ystride << bsize) + (bx << bsize)], ystride,
+         &in[(by*OD_FILT_BSTRIDE << bsize) + (bx << bsize)],
+         &x[(by*xstride << bsize) + (bx << bsize)], xstride, bsize,
+         thresh[by][bx], dir[by][bx]);
+      }
     }
   }
 }
