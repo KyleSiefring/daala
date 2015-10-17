@@ -155,10 +155,19 @@ void od_filter_dering_direction_4x4(int16_t *y, int ystride, int16_t *in,
   int offset0;
   int offset1;
   int offset2;
+  if (threshold == 0) {
+    for (i = 0; i < 4; i+=2) {
+      row = _mm_loadl_epi64((__m128i *)&in[i*OD_FILT_BSTRIDE]);
+      _mm_storel_epi64((__m128i*)&y[i*ystride], row);
+      row = _mm_loadl_epi64((__m128i *)&in[(i+1)*OD_FILT_BSTRIDE]);
+      _mm_storel_epi64((__m128i*)&y[(i+1)*ystride], row);
+    }
+    return;
+  }
   offset0 = direction_offsets_table[dir][0];
   offset1 = direction_offsets_table[dir][1];
   offset2 = direction_offsets_table[dir][2];
-  for (i = 0; i < 4; i+=2) {
+  for (i = 0; i < 4; i += 2) {
     sum = _mm_setzero_si128();
     row = _mm_unpacklo_epi64(_mm_loadl_epi64((__m128i *)&in[i*OD_FILT_BSTRIDE]),
      _mm_loadl_epi64((__m128i *)&in[(i+1)*OD_FILT_BSTRIDE]));

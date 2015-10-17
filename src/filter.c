@@ -2347,6 +2347,8 @@ static void od_compute_thresh(int thresh[OD_DERING_NBLOCKS][OD_DERING_NBLOCKS],
   }
 }
 
+#define PREFETCH_T0(addr) _mm_prefetch(((char *)(addr)),_MM_HINT_T0)
+
 void od_dering(od_state *state, int16_t *y, int ystride, int16_t *x, int xstride, int ln,
  int sbx, int sby, int nhsb, int nvsb, int q, int xdec,
  int dir[OD_DERING_NBLOCKS][OD_DERING_NBLOCKS],
@@ -2366,6 +2368,7 @@ void od_dering(od_state *state, int16_t *y, int ystride, int16_t *x, int xstride
   int32_t var[OD_DERING_NBLOCKS][OD_DERING_NBLOCKS];
   int thresh[OD_DERING_NBLOCKS][OD_DERING_NBLOCKS];
   __m128i very_large_vec;
+  int skipall;
   n = 1 << ln;
   bsize = 3 - xdec;
   nhb = nvb = n >> bsize;
@@ -2374,7 +2377,7 @@ void od_dering(od_state *state, int16_t *y, int ystride, int16_t *x, int xstride
      are outside the frame. We could change the filter instead, but it would
      add special cases for any future vectorization. */
   very_large_vec = _mm_set1_epi16(OD_DERING_VERY_LARGE);
-#define FASTER_FILL
+#define FASTER_FILL 0
   if (sby == 0) {
     for (i = -OD_FILT_BORDER; i < 0; i++) {
       for (j = -OD_FILT_BORDER; j < n + OD_FILT_BORDER; j++) {
@@ -2391,22 +2394,80 @@ void od_dering(od_state *state, int16_t *y, int ystride, int16_t *x, int xstride
   }
   if (sbx == 0) {
     for (i = -OD_FILT_BORDER; i < n + OD_FILT_BORDER; i++) {
-      _mm_storeu_si128((__m128i *)(in + i*OD_FILT_BSTRIDE - OD_FILT_BORDER),
+#if FASTER_FILL
+      _mm_storel_epi64((__m128i *)(in + i*OD_FILT_BSTRIDE - OD_FILT_BORDER),
        very_large_vec);
-      /*for (j = -OD_FILT_BORDER; j < 0; j++) {
+#else
+      for (j = -OD_FILT_BORDER; j < 0; j++) {
         in[i*OD_FILT_BSTRIDE + j] = OD_DERING_VERY_LARGE;
-      }*/
+      }
+#endif
     }
   }
   if (sbx == nhsb - 1) {
     for (i = -OD_FILT_BORDER; i < n + OD_FILT_BORDER; i++) {
-      _mm_storeu_si128((__m128i *)(in + i*OD_FILT_BSTRIDE + n),
+#if FASTER_FILL
+      _mm_storel_epi64((__m128i *)(in + i*OD_FILT_BSTRIDE + n),
        very_large_vec);
-      /*for (j = n; j < n + OD_FILT_BORDER; j++) {
+#else
+      for (j = n; j < n + OD_FILT_BORDER; j++) {
         in[i*OD_FILT_BSTRIDE + j] = OD_DERING_VERY_LARGE;
-      }*/
+      }
+#endif
     }
   }
+#if 1
+  /*if (sbx != 0 && sbx != nhsb - 1)*/
+  {
+    for (i = -OD_FILT_BORDER*(sby != 0); i < n
+     + OD_FILT_BORDER*(sby != nvsb - 1); i++) {
+      uint64_t edge;
+      __m128i row_data;
+      if (sbx != 0) {
+        edge = *((uint64_t *)(x + i*xstride - OD_FILT_BORDER));
+        *((int64_t *)(in + i*OD_FILT_BSTRIDE - OD_FILT_BORDER)) = edge;
+        /**((uint32_t *)(in + i*OD_FILT_BSTRIDE - OD_FILT_BORDER)) = 
+         *((uint32_t *)(x + i*xstride - OD_FILT_BORDER));
+        *((uint16_t *)(in + i*OD_FILT_BSTRIDE - OD_FILT_BORDER + 2)) =
+         *((uint16_t *)(x + i*xstride - OD_FILT_BORDER + 2));*/
+        /*row_data = _mm_loadl_epi64((__m128i *)(x + i*xstride - OD_FILT_BORDER));
+        _mm_storel_epi64((__m128i *)(in + i*OD_FILT_BSTRIDE - OD_FILT_BORDER), row_data);*/
+        /*PREFETCH_T0(x + (i+1)*xstride - OD_FILT_BORDER);
+        PREFETCH_T0(in + (i+1)*OD_FILT_BSTRIDE - OD_FILT_BORDER);*/
+      }
+      if (sbx != nhsb - 1) {
+        edge = *((uint64_t *)(x + i*xstride + n - (4 - OD_FILT_BORDER)));
+        *((int64_t *)(in + i*OD_FILT_BSTRIDE + n - (4 - OD_FILT_BORDER))) = edge;
+        /**((uint32_t *)(in + i*OD_FILT_BSTRIDE + n)) = 
+         *((uint32_t *)(x + i*xstride + n));
+        *((uint16_t *)(in + i*OD_FILT_BSTRIDE + n + 2)) =
+         *((uint16_t *)(x + i*xstride + n + 2));*/
+        /*row_data = _mm_loadl_epi64((__m128i *)(x + i*xstride + n - (4 - OD_FILT_BORDER)));
+        _mm_storel_epi64((__m128i *)(in + i*OD_FILT_BSTRIDE + n - (4 - OD_FILT_BORDER), row_data);*/
+        /*PREFETCH_T0(x + (i+1)*xstride + n - (4 - OD_FILT_BORDER));
+        PREFETCH_T0(in + (i+1)*OD_FILT_BSTRIDE + n - (4 - OD_FILT_BORDER));*/
+      }
+      /*edge = *((uint64_t *)(x + i*xstride - OD_FILT_BORDER));
+      *((int64_t *)(in + i*OD_FILT_BSTRIDE - OD_FILT_BORDER)) = edge;
+      edge = *((uint64_t *)(x + i*xstride + n - (4 - OD_FILT_BORDER)));
+      *((int64_t *)(in + i*OD_FILT_BSTRIDE + n - (4 - OD_FILT_BORDER))) = edge;*/
+      for (j = 0; j < n; j += 8) {
+        row_data = _mm_load_si128((__m128i *)(x + i*xstride + j));
+        _mm_storeu_si128((__m128i *)(in + i*OD_FILT_BSTRIDE + j), row_data);
+      }
+    }
+  }
+  /*else {
+    for (i = -OD_FILT_BORDER*(sby != 0); i < n 
+     + OD_FILT_BORDER*(sby != nvsb - 1); i++) {
+      int start_offset;
+      start_offset = -OD_FILT_BORDER*(sbx != 0);
+      OD_COPY(in + i*OD_FILT_BSTRIDE + start_offset,
+       x + i*xstride + start_offset,
+       n + OD_FILT_BORDER*(sbx != nhsb - 1) - start_offset);
+    }
+  }*/
+#else
   for (i = -OD_FILT_BORDER*(sby != 0); i < n
    + OD_FILT_BORDER*(sby != nvsb - 1); i++) {
 #if 1
@@ -2422,6 +2483,7 @@ void od_dering(od_state *state, int16_t *y, int ystride, int16_t *x, int xstride
     }
 #endif
   }
+#endif
   /*if (count == 0)
   {
     int16_t inbuf2[OD_DERING_INBUF_SIZE];
@@ -2556,17 +2618,26 @@ void od_dering(od_state *state, int16_t *y, int ystride, int16_t *x, int xstride
       }
     }
   }
+  /*printf("%i:\t", threshold);*/
   for (by = 0; by < nvb; by++) {
     for (bx = 0; bx < nhb; bx++) {
+      /*printf("%i ", thresh[by][bx]);*/
       (*state->opt_vtbl.filter_dering_direction)(&y[(by*ystride << bsize) +
        (bx << bsize)], ystride, &in[(by*OD_FILT_BSTRIDE << bsize) + (bx << bsize)],
        bsize, thresh[by][bx], dir[by][bx]);
     }
   }
+  /*printf("\n");*/
   /*This copy can probably be removed by looping differently for
      different directions.*/
   for (i = 0; i < n; i++) {
 #if 1
+    for (j = 0; j < n; j += 8) {
+      __m128i row_data;
+      row_data = _mm_load_si128((__m128i *)(y + i*ystride + j));
+      _mm_storeu_si128((__m128i *)(in + i*OD_FILT_BSTRIDE + j), row_data);
+    }
+#elif 1
     OD_COPY(in + i*OD_FILT_BSTRIDE, y + i*ystride, n);
 #else
     for (j = 0; j < n; j++) {
