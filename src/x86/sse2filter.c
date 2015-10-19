@@ -205,7 +205,6 @@ void od_filter_dering_direction_4x4(int16_t *y, int ystride, int16_t *in,
       sum = _mm_add_epi16(sum, p);
     }
 #else
-    k = 0;
     {
       /* p = in[i*OD_FILT_BSTRIDE + offset] - row */;
       p = _mm_unpacklo_epi64(
@@ -220,7 +219,6 @@ void od_filter_dering_direction_4x4(int16_t *y, int ystride, int16_t *in,
       /* if (abs(p) < threshold) sum += taps[k]*p1; */
       sum = od_cmp_add_3taps(row, lo, hi, p, sum);
     }
-    k = 1;
     {
       /* p = in[i*OD_FILT_BSTRIDE + offset] - row */;
       p = _mm_unpacklo_epi64(
@@ -235,7 +233,6 @@ void od_filter_dering_direction_4x4(int16_t *y, int ystride, int16_t *in,
       /* if (abs(p) < threshold) sum += taps[k]*p1; */
       sum = od_cmp_add_2taps(row, lo, hi, p, sum);
     }
-    k = 2;
     {
       /* p = in[i*OD_FILT_BSTRIDE + offset] - row */;
       p = _mm_unpacklo_epi64(

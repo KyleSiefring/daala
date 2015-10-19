@@ -1726,8 +1726,6 @@ OD_SIMD_INLINE int od_extend1(__m128i vec) {
 #endif
 }
 
-static int count = 0;
-
 /* Detect direction. 0 means 45-degree up-right, 2 is horizontal, and so on.
    The search minimizes the weighted variance along all the lines in a
    particular direction, i.e. the squared error between the input and a
@@ -1918,23 +1916,17 @@ static int od_dir_find8(const int16_t *img, int stride, int32_t *var) {
     for (j = 0; j < 8; j++) {
       int x;
       x = img[i*stride + j] >> OD_COEFF_SHIFT;
-      /*partial[0][i + j] += x;*/
-      /*if (i/2 + j == 3 && count == 0)
-	printf("%i\n", x);*/
+      partial[0][i + j] += x;
       partial[1][i + j/2] += x;
-      /*partial[2][i] += x;*/
+      partial[2][i] += x;
       partial[3][3 + i - j/2] += x;
-      /*partial[4][7 + i - j] += x;*/
-      /*partial[5][3 - i/2 + j] += x;*/
-      /*partial[6][j] += x;*/
-      /*partial[7][i/2 + j] += x;*/
+      partial[4][7 + i - j] += x;
+      partial[5][3 - i/2 + j] += x;
+      partial[6][j] += x;
+      partial[7][i/2 + j] += x;
     }
   }
 #endif
-  /*if (count == 0) {
-    printf("%i %i\n", partial[7][3]);
-    count++;
-  }*/
 #if 1
   {
     __m128i cost_vec;
@@ -1956,16 +1948,6 @@ static int od_dir_find8(const int16_t *img, int stride, int32_t *var) {
     cost_vec = _mm_add_epi32(cost_vec, _mm_srli_si128(cost_vec, 8));
     cost_vec = _mm_add_epi32(cost_vec, _mm_srli_si128(cost_vec, 4));
     cost[6] = _mm_cvtsi128_si32(cost_vec);
-    /*sums = _mm_add_epi32(sums, _mm_srli_si128(sums, 8));
-    sums = _mm_add_epi32(sums, _mm_srli_si128(sums, 4));*/
-    /*tmp0 = _mm_unpacklo_epi32(partial2, partial6);
-    tmp1 = _mm_unpackhi_epi32(partial2, partial6);
-    tmp0 = _mm_add_epi32(tmp0, tmp1);
-    tmp1 = _mm_bsrli_si128(tmp0, 8);
-    tmp0 = _mm_add_epi32(tmp0, tmp1);
-    cost[2] = _mm_cvtsi128_si32(tmp0);
-    tmp0 = _mm_bsrli_si128(tmp0, 4);
-    cost[6] = _mm_cvtsi128_si32(tmp0);*/
   }
 #else
   for (i = 0; i < 8; i++) {
@@ -2170,37 +2152,10 @@ uint32_t OD_DIVU_SMALL_CONSTS[OD_DIVU_DMAX][2] = {
       cost[i] += M(partial[i][3 + j]) >> 3;
     }*/
 #if 0
-#if 1
-    #define LOOP_BODY(index) j = index; \
-    { \
-      int a; \
-      int b; \
-      int divisor; \
-      a = M(partial[i][j]); \
-      b = M(partial[i][10 - j]); \
-      divisor = 2*j + 2; \
-      if (divisor == 2) { \
-        a >>= 1; \
-        b >>= 1; \
-      } else if (divisor == 4) { \
-        a >>= 2; \
-        b >>= 2; \
-      } else { \
-        a = OD_DIVU_SMALL(a, divisor); \
-	b = OD_DIVU_SMALL(b, divisor); \
-      } \
-      cost[i] += /*a + */b; \
-    }
-    LOOP_BODY(0)
-    LOOP_BODY(1)
-    LOOP_BODY(2)
-    #undef LOOP_BODY
-#else
     for (j = 0; j < 4 - 1; j++) {
       cost[i] += OD_DIVU_SMALL(partial[i][j]*partial[i][j], 2*j + 2)
        + OD_DIVU_SMALL(partial[i][10 - j]*partial[i][10 - j], 2*j + 2);
     }
-#endif
 #endif
   }
   {
@@ -2234,17 +2189,11 @@ uint32_t OD_DIVU_SMALL_CONSTS[OD_DIVU_DMAX][2] = {
     div6 = _mm_unpackhi_epi32(tmp0, tmp1);
     div6 = _mm_slli_si128(div6, 8);
     sum = _mm_add_epi32(sum, div6);
-
     div8 = _mm_loadu_si128((__m128i *)(partial[1]+7));
     div6 = _mm_loadu_si128((__m128i *)(partial[3]+7));
     div4 = _mm_loadu_si128((__m128i *)(partial[5]+7));
     div2 = _mm_loadu_si128((__m128i *)(partial[7]+7));
-    /*div8 = _mm_set_epi32(110, 109, 108, 107);
-    div6 = _mm_set_epi32(210, 209, 208, 207);
-    div4 = _mm_set_epi32(310, 309, 308, 307);
-    div2 = _mm_set_epi32(410, 409, 408, 407);*/
     od_transpose32x4(&div8, &div6, &div4, &div2);
-
     div2 = _mm_srli_epi32(div2, 1);
     div4 = _mm_srli_epi32(div4, 2);
     sum = _mm_add_epi32(sum, div2);
@@ -2259,7 +2208,6 @@ uint32_t OD_DIVU_SMALL_CONSTS[OD_DIVU_DMAX][2] = {
     div6 = _mm_unpackhi_epi32(tmp0, tmp1);
     div6 = _mm_slli_si128(div6, 8);
     sum = _mm_add_epi32(sum, div6);
-
     cost[1] += _mm_cvtsi128_si32(sum);
     sum = _mm_srli_si128(sum, 4);
     cost[3] += _mm_cvtsi128_si32(sum);
@@ -2267,13 +2215,6 @@ uint32_t OD_DIVU_SMALL_CONSTS[OD_DIVU_DMAX][2] = {
     cost[5] += _mm_cvtsi128_si32(sum);
     sum = _mm_srli_si128(sum, 4);
     cost[7] += _mm_cvtsi128_si32(sum);
-    /*if (count == 0) {
-      print128_num32(div2);
-      print128_num32(div4);
-      print128_num32(div6);
-      print128_num32(div8);
-      count++;
-    }*/
   }
   {
     __m128i dirs0;
@@ -2310,8 +2251,6 @@ uint32_t OD_DIVU_SMALL_CONSTS[OD_DIVU_DMAX][2] = {
      _mm_andnot_si128(cmp, dirs1));
     best_cost = _mm_cvtsi128_si32(costs0) >> 3;
     best_dir = _mm_cvtsi128_si32(dirs0);
-    /*printf("START\n%i %i\n", best_dir, best_cost);*/
-    /*best_cost = 0;*/
   }
   /*for (i = 0; i < 8; i++) {
     if (cost[i] > best_cost) {
@@ -2319,8 +2258,6 @@ uint32_t OD_DIVU_SMALL_CONSTS[OD_DIVU_DMAX][2] = {
       best_dir = i;
     }
   }*/
-  /*if (c != best_cost || d != best_dir)
-    printf("Error: %i %i\n%i %i\n%i\n", best_dir, best_cost, d, c, count);*/
   /* Difference between the optimal variance and the variance along the
      orthogonal direction. Again, the sum(x^2) terms cancel out. */
   *var = best_cost - cost[(best_dir + 4) & 7];
@@ -2433,73 +2370,71 @@ static void od_compute_thresh(int thresh[OD_DERING_NBLOCKS][OD_DERING_NBLOCKS],
 }
 
 static uint8_t od_quantizer_thres_table[512] = {
-  0,   1,   1,   2,   3,   3,   4,   5, 
-  5,   6,   6,   7,   8,   8,   9,   9, 
- 10,  10,  11,  11,  12,  12,  13,  14, 
- 14,  15,  15,  16,  16,  17,  17,  18, 
- 18,  18,  19,  19,  20,  20,  21,  21, 
- 22,  22,  23,  23,  24,  24,  25,  25, 
- 26,  26,  26,  27,  27,  28,  28,  29, 
- 29,  30,  30,  30,  31,  31,  32,  32, 
- 33,  33,  34,  34,  34,  35,  35,  36, 
- 36,  37,  37,  37,  38,  38,  39,  39, 
- 39,  40,  40,  41,  41,  42,  42,  42, 
- 43,  43,  44,  44,  44,  45,  45,  46, 
- 46,  47,  47,  47,  48,  48,  49,  49, 
- 49,  50,  50,  51,  51,  51,  52,  52, 
- 53,  53,  53,  54,  54,  55,  55,  55, 
- 56,  56,  57,  57,  57,  58,  58,  59, 
- 59,  59,  60,  60,  60,  61,  61,  62, 
- 62,  62,  63,  63,  64,  64,  64,  65, 
- 65,  65,  66,  66,  67,  67,  67,  68, 
- 68,  69,  69,  69,  70,  70,  70,  71, 
- 71,  72,  72,  72,  73,  73,  73,  74, 
- 74,  75,  75,  75,  76,  76,  76,  77, 
- 77,  78,  78,  78,  79,  79,  79,  80, 
- 80,  81,  81,  81,  82,  82,  82,  83, 
- 83,  83,  84,  84,  85,  85,  85,  86, 
- 86,  86,  87,  87,  87,  88,  88,  89, 
- 89,  89,  90,  90,  90,  91,  91,  91, 
- 92,  92,  93,  93,  93,  94,  94,  94, 
- 95,  95,  95,  96,  96,  96,  97,  97, 
- 98,  98,  98,  99,  99,  99, 100, 100, 
-100, 101, 101, 101, 102, 102, 102, 103, 
-103, 104, 104, 104, 105, 105, 105, 106, 
-106, 106, 107, 107, 107, 108, 108, 108, 
-109, 109, 109, 110, 110, 111, 111, 111, 
-112, 112, 112, 113, 113, 113, 114, 114, 
-114, 115, 115, 115, 116, 116, 116, 117, 
-117, 117, 118, 118, 118, 119, 119, 119, 
-120, 120, 121, 121, 121, 122, 122, 122, 
-123, 123, 123, 124, 124, 124, 125, 125, 
-125, 126, 126, 126, 127, 127, 127, 128, 
-128, 128, 129, 129, 129, 130, 130, 130, 
-131, 131, 131, 132, 132, 132, 133, 133, 
-133, 134, 134, 134, 135, 135, 135, 136, 
-136, 136, 137, 137, 137, 138, 138, 138, 
-139, 139, 139, 140, 140, 140, 141, 141, 
-141, 142, 142, 142, 143, 143, 143, 144, 
-144, 144, 145, 145, 145, 146, 146, 146, 
-147, 147, 147, 148, 148, 148, 149, 149, 
-149, 150, 150, 150, 151, 151, 151, 152, 
-152, 152, 153, 153, 153, 154, 154, 154, 
-155, 155, 155, 156, 156, 156, 157, 157, 
-157, 157, 158, 158, 158, 159, 159, 159, 
-160, 160, 160, 161, 161, 161, 162, 162, 
-162, 163, 163, 163, 164, 164, 164, 165, 
-165, 165, 166, 166, 166, 167, 167, 167, 
-168, 168, 168, 168, 169, 169, 169, 170, 
+  0,   1,   1,   2,   3,   3,   4,   5,
+  5,   6,   6,   7,   8,   8,   9,   9,
+ 10,  10,  11,  11,  12,  12,  13,  14,
+ 14,  15,  15,  16,  16,  17,  17,  18,
+ 18,  18,  19,  19,  20,  20,  21,  21,
+ 22,  22,  23,  23,  24,  24,  25,  25,
+ 26,  26,  26,  27,  27,  28,  28,  29,
+ 29,  30,  30,  30,  31,  31,  32,  32,
+ 33,  33,  34,  34,  34,  35,  35,  36,
+ 36,  37,  37,  37,  38,  38,  39,  39,
+ 39,  40,  40,  41,  41,  42,  42,  42,
+ 43,  43,  44,  44,  44,  45,  45,  46,
+ 46,  47,  47,  47,  48,  48,  49,  49,
+ 49,  50,  50,  51,  51,  51,  52,  52,
+ 53,  53,  53,  54,  54,  55,  55,  55,
+ 56,  56,  57,  57,  57,  58,  58,  59,
+ 59,  59,  60,  60,  60,  61,  61,  62,
+ 62,  62,  63,  63,  64,  64,  64,  65,
+ 65,  65,  66,  66,  67,  67,  67,  68,
+ 68,  69,  69,  69,  70,  70,  70,  71,
+ 71,  72,  72,  72,  73,  73,  73,  74,
+ 74,  75,  75,  75,  76,  76,  76,  77,
+ 77,  78,  78,  78,  79,  79,  79,  80,
+ 80,  81,  81,  81,  82,  82,  82,  83,
+ 83,  83,  84,  84,  85,  85,  85,  86,
+ 86,  86,  87,  87,  87,  88,  88,  89,
+ 89,  89,  90,  90,  90,  91,  91,  91,
+ 92,  92,  93,  93,  93,  94,  94,  94,
+ 95,  95,  95,  96,  96,  96,  97,  97,
+ 98,  98,  98,  99,  99,  99, 100, 100,
+100, 101, 101, 101, 102, 102, 102, 103,
+103, 104, 104, 104, 105, 105, 105, 106,
+106, 106, 107, 107, 107, 108, 108, 108,
+109, 109, 109, 110, 110, 111, 111, 111,
+112, 112, 112, 113, 113, 113, 114, 114,
+114, 115, 115, 115, 116, 116, 116, 117,
+117, 117, 118, 118, 118, 119, 119, 119,
+120, 120, 121, 121, 121, 122, 122, 122,
+123, 123, 123, 124, 124, 124, 125, 125,
+125, 126, 126, 126, 127, 127, 127, 128,
+128, 128, 129, 129, 129, 130, 130, 130,
+131, 131, 131, 132, 132, 132, 133, 133,
+133, 134, 134, 134, 135, 135, 135, 136,
+136, 136, 137, 137, 137, 138, 138, 138,
+139, 139, 139, 140, 140, 140, 141, 141,
+141, 142, 142, 142, 143, 143, 143, 144,
+144, 144, 145, 145, 145, 146, 146, 146,
+147, 147, 147, 148, 148, 148, 149, 149,
+149, 150, 150, 150, 151, 151, 151, 152,
+152, 152, 153, 153, 153, 154, 154, 154,
+155, 155, 155, 156, 156, 156, 157, 157,
+157, 157, 158, 158, 158, 159, 159, 159,
+160, 160, 160, 161, 161, 161, 162, 162,
+162, 163, 163, 163, 164, 164, 164, 165,
+165, 165, 166, 166, 166, 167, 167, 167,
+168, 168, 168, 168, 169, 169, 169, 170,
 170, 170, 171, 171, 171, 172, 172, 172, 
-173, 173, 173, 174, 174, 174, 175, 175, 
-175, 176, 176, 176, 176, 177, 177, 177, 
-178, 178, 178, 179, 179, 179, 180, 180, 
-180, 181, 181, 181, 182, 182, 182, 182, 
-183, 183, 183, 184, 184, 184, 185, 185, 
-185, 186, 186, 186, 187, 187, 187, 188, 
-188, 188, 188, 189, 189, 189, 190, 190, 
-}; 
-
-#define PREFETCH_T0(addr) _mm_prefetch(((char *)(addr)),_MM_HINT_T0)
+173, 173, 173, 174, 174, 174, 175, 175,
+175, 176, 176, 176, 176, 177, 177, 177,
+178, 178, 178, 179, 179, 179, 180, 180,
+180, 181, 181, 181, 182, 182, 182, 182,
+183, 183, 183, 184, 184, 184, 185, 185,
+185, 186, 186, 186, 187, 187, 187, 188,
+188, 188, 188, 189, 189, 189, 190, 190,
+};
 
 void od_dering(od_state *state, int16_t *y, int ystride, int16_t *x, int xstride, int ln,
  int sbx, int sby, int nhsb, int nvsb, int q, int xdec,
@@ -2519,10 +2454,6 @@ void od_dering(od_state *state, int16_t *y, int ystride, int16_t *x, int xstride
   int varsum = 0;
   int32_t var[OD_DERING_NBLOCKS][OD_DERING_NBLOCKS];
   int thresh[OD_DERING_NBLOCKS][OD_DERING_NBLOCKS];
-#define FASTER_FILL 0
-#if FASTER_FILL
-  __m128i very_large_vec;
-#endif
   n = 1 << ln;
   bsize = 3 - xdec;
   nhb = nvb = n >> bsize;
@@ -2530,9 +2461,6 @@ void od_dering(od_state *state, int16_t *y, int ystride, int16_t *x, int xstride
   /* We avoid filtering the pixels for which some of the pixels to average
      are outside the frame. We could change the filter instead, but it would
      add special cases for any future vectorization. */
-#if FASTER_FILL
-  very_large_vec = _mm_set1_epi16(OD_DERING_VERY_LARGE);
-#endif
   if (sby == 0) {
     for (i = -OD_FILT_BORDER; i < 0; i++) {
       for (j = -OD_FILT_BORDER; j < n + OD_FILT_BORDER; j++) {
@@ -2549,79 +2477,52 @@ void od_dering(od_state *state, int16_t *y, int ystride, int16_t *x, int xstride
   }
   if (sbx == 0) {
     for (i = -OD_FILT_BORDER; i < n + OD_FILT_BORDER; i++) {
-#if FASTER_FILL
-      _mm_storel_epi64((__m128i *)(in + i*OD_FILT_BSTRIDE - OD_FILT_BORDER),
-       very_large_vec);
-#else
       for (j = -OD_FILT_BORDER; j < 0; j++) {
         in[i*OD_FILT_BSTRIDE + j] = OD_DERING_VERY_LARGE;
       }
-#endif
     }
   }
   if (sbx == nhsb - 1) {
     for (i = -OD_FILT_BORDER; i < n + OD_FILT_BORDER; i++) {
-#if FASTER_FILL
-      _mm_storel_epi64((__m128i *)(in + i*OD_FILT_BSTRIDE + n),
-       very_large_vec);
-#else
       for (j = n; j < n + OD_FILT_BORDER; j++) {
         in[i*OD_FILT_BSTRIDE + j] = OD_DERING_VERY_LARGE;
       }
-#endif
     }
   }
 #if 1
-  /*if (sbx != 0 && sbx != nhsb - 1)*/
-  {
-    for (i = -OD_FILT_BORDER*(sby != 0); i < n
-     + OD_FILT_BORDER*(sby != nvsb - 1); i++) {
-      uint64_t edge;
-      __m128i row_data;
-      if (sbx != 0) {
-        edge = *((uint64_t *)(x + i*xstride - OD_FILT_BORDER));
-        *((int64_t *)(in + i*OD_FILT_BSTRIDE - OD_FILT_BORDER)) = edge;
-        /**((uint32_t *)(in + i*OD_FILT_BSTRIDE - OD_FILT_BORDER)) = 
-         *((uint32_t *)(x + i*xstride - OD_FILT_BORDER));
-        *((uint16_t *)(in + i*OD_FILT_BSTRIDE - OD_FILT_BORDER + 2)) =
-         *((uint16_t *)(x + i*xstride - OD_FILT_BORDER + 2));*/
-        /*row_data = _mm_loadl_epi64((__m128i *)(x + i*xstride - OD_FILT_BORDER));
-        _mm_storel_epi64((__m128i *)(in + i*OD_FILT_BSTRIDE - OD_FILT_BORDER), row_data);*/
-        /*PREFETCH_T0(x + (i+1)*xstride - OD_FILT_BORDER);
-        PREFETCH_T0(in + (i+1)*OD_FILT_BSTRIDE - OD_FILT_BORDER);*/
-      }
-      if (sbx != nhsb - 1) {
-        edge = *((uint64_t *)(x + i*xstride + n - (4 - OD_FILT_BORDER)));
-        *((int64_t *)(in + i*OD_FILT_BSTRIDE + n - (4 - OD_FILT_BORDER))) = edge;
-        /**((uint32_t *)(in + i*OD_FILT_BSTRIDE + n)) = 
-         *((uint32_t *)(x + i*xstride + n));
-        *((uint16_t *)(in + i*OD_FILT_BSTRIDE + n + 2)) =
-         *((uint16_t *)(x + i*xstride + n + 2));*/
-        /*row_data = _mm_loadl_epi64((__m128i *)(x + i*xstride + n - (4 - OD_FILT_BORDER)));
-        _mm_storel_epi64((__m128i *)(in + i*OD_FILT_BSTRIDE + n - (4 - OD_FILT_BORDER), row_data);*/
-        /*PREFETCH_T0(x + (i+1)*xstride + n - (4 - OD_FILT_BORDER));
-        PREFETCH_T0(in + (i+1)*OD_FILT_BSTRIDE + n - (4 - OD_FILT_BORDER));*/
-      }
-      /*edge = *((uint64_t *)(x + i*xstride - OD_FILT_BORDER));
+  for (i = -OD_FILT_BORDER*(sby != 0); i < n
+   + OD_FILT_BORDER*(sby != nvsb - 1); i++) {
+    uint64_t edge;
+    __m128i row_data;
+    if (sbx != 0) {
+      edge = *((uint64_t *)(x + i*xstride - OD_FILT_BORDER));
       *((int64_t *)(in + i*OD_FILT_BSTRIDE - OD_FILT_BORDER)) = edge;
+      /**((uint32_t *)(in + i*OD_FILT_BSTRIDE - OD_FILT_BORDER)) = 
+       *((uint32_t *)(x + i*xstride - OD_FILT_BORDER));
+      *((uint16_t *)(in + i*OD_FILT_BSTRIDE - OD_FILT_BORDER + 2)) =
+       *((uint16_t *)(x + i*xstride - OD_FILT_BORDER + 2));*/
+      /*row_data = _mm_loadl_epi64((__m128i *)(x + i*xstride - OD_FILT_BORDER));
+      _mm_storel_epi64((__m128i *)(in + i*OD_FILT_BSTRIDE - OD_FILT_BORDER), row_data);*/
+      /*PREFETCH_T0(x + (i+1)*xstride - OD_FILT_BORDER);
+      PREFETCH_T0(in + (i+1)*OD_FILT_BSTRIDE - OD_FILT_BORDER);*/
+    }
+    if (sbx != nhsb - 1) {
       edge = *((uint64_t *)(x + i*xstride + n - (4 - OD_FILT_BORDER)));
-      *((int64_t *)(in + i*OD_FILT_BSTRIDE + n - (4 - OD_FILT_BORDER))) = edge;*/
-      for (j = 0; j < n; j += 8) {
-        row_data = _mm_load_si128((__m128i *)(x + i*xstride + j));
-        _mm_storeu_si128((__m128i *)(in + i*OD_FILT_BSTRIDE + j), row_data);
-      }
+      *((int64_t *)(in + i*OD_FILT_BSTRIDE + n - (4 - OD_FILT_BORDER))) = edge;
+      /**((uint32_t *)(in + i*OD_FILT_BSTRIDE + n)) = 
+       *((uint32_t *)(x + i*xstride + n));
+      *((uint16_t *)(in + i*OD_FILT_BSTRIDE + n + 2)) =
+       *((uint16_t *)(x + i*xstride + n + 2));*/
+      /*row_data = _mm_loadl_epi64((__m128i *)(x + i*xstride + n - (4 - OD_FILT_BORDER)));
+      _mm_storel_epi64((__m128i *)(in + i*OD_FILT_BSTRIDE + n - (4 - OD_FILT_BORDER), row_data);*/
+      /*PREFETCH_T0(x + (i+1)*xstride + n - (4 - OD_FILT_BORDER));
+      PREFETCH_T0(in + (i+1)*OD_FILT_BSTRIDE + n - (4 - OD_FILT_BORDER));*/
+    }
+    for (j = 0; j < n; j += 8) {
+      row_data = _mm_load_si128((__m128i *)(x + i*xstride + j));
+      _mm_storeu_si128((__m128i *)(in + i*OD_FILT_BSTRIDE + j), row_data);
     }
   }
-  /*else {
-    for (i = -OD_FILT_BORDER*(sby != 0); i < n 
-     + OD_FILT_BORDER*(sby != nvsb - 1); i++) {
-      int start_offset;
-      start_offset = -OD_FILT_BORDER*(sbx != 0);
-      OD_COPY(in + i*OD_FILT_BSTRIDE + start_offset,
-       x + i*xstride + start_offset,
-       n + OD_FILT_BORDER*(sbx != nhsb - 1) - start_offset);
-    }
-  }*/
 #else
   for (i = -OD_FILT_BORDER*(sby != 0); i < n
    + OD_FILT_BORDER*(sby != nvsb - 1); i++) {
@@ -2639,33 +2540,6 @@ void od_dering(od_state *state, int16_t *y, int ystride, int16_t *x, int xstride
 #endif
   }
 #endif
-  /*if (count == 0)
-  {
-    int16_t inbuf2[OD_DERING_INBUF_SIZE];
-    int16_t *in2;
-    in2 = inbuf2 + OD_FILT_BORDER*OD_FILT_BSTRIDE + OD_FILT_BORDER;
-    if (sby == 0) {
-      for (i = 0; i < OD_FILT_BORDER*OD_FILT_BSTRIDE; i++) inbuf2[i] = OD_DERING_VERY_LARGE;
-    }  
-    if (sby == nvsb - 1 || sbx == 0 || sbx == nvsb - 1) {
-      for (i = 0; i < OD_DERING_INBUF_SIZE; i++) inbuf2[i] = OD_DERING_VERY_LARGE;
-    }
-    for (i = -OD_FILT_BORDER*(sby != 0); i < n
-     + OD_FILT_BORDER*(sby != nvsb - 1); i++) {
-      int start_offset;
-      start_offset = -OD_FILT_BORDER*(sbx != 0);
-      OD_COPY(in2 + i*OD_FILT_BSTRIDE + start_offset,
-       x + i*xstride + start_offset,
-       n + OD_FILT_BORDER*(sbx != nhsb - 1) - start_offset);
-    }
-    for (i = 0; i < OD_DERING_INBUF_SIZE; i++) {
-      if (inbuf2[i] != inbuf[i]) {
-        printf("%i %i %i\n", i, inbuf[i], inbuf2[i]);
-        count++;
-      }
-    }
-    printf("%i\n", n);
-  }*/
   /* The threshold is meant to be the estimated amount of ringing for a given
      quantizer. Ringing is mostly proportional to the quantizer, but we
      use an exponent slightly smaller than unity because as quantization
@@ -2733,22 +2607,16 @@ void od_dering(od_state *state, int16_t *y, int ystride, int16_t *x, int xstride
   else if (xdec == 1) {
     for (by = 0; by < nvb; by++) {
       for (bx = 0; bx < nhb; bx++) {
-        int skip;
-        uint32_t mask;
-        skip = 1;
-        mask = 0xFFFFFF;
+        uint32_t skip;
+        skip = 0xFFFFFF;
         /* We look at whether the current block and its 4x4 surrounding (due to
            lapping) are skipped to avoid filtering the same content multiple
            times. */
         for (i = -1; i < 2; i++) {
-          mask &= *((uint32_t *)(bskip + (by + i)*skip_stride + bx - 1));
-          /*for (j = -1; j < 2; j++) {
-            skip = skip && bskip[(by + i)*skip_stride + bx + j];
-          }*/
+          skip &= *((uint32_t *)(bskip + (by + i)*skip_stride + bx - 1));
         }
-        mask &= mask >> 8;
-        mask &= mask >> 8;
-        skip = mask;
+        skip &= skip >> 8;
+        skip &= skip >> 8;
         if (skip) thresh[by][bx] = 0;
       }
     }
@@ -2756,44 +2624,27 @@ void od_dering(od_state *state, int16_t *y, int ystride, int16_t *x, int xstride
   else if(xdec == 0) {
     for (by = 0; by < nvb; by++) {
       for (bx = 0; bx < nhb; bx++) {
-        int skip;
-        uint32_t mask;
-        skip = 1;
-        mask = 0xFFFFFFFF;
+        uint32_t skip;
+        skip = 0xFFFFFFFF;
         /* We look at whether the current block and its 4x4 surrounding (due to
            lapping) are skipped to avoid filtering the same content multiple
            times. */
-#if 1
         for (i = -1; i < 3; i++) {
-          /*for (j = -1; j < 3; j++) {
-            skip = skip && bskip[((by << 1 >> xdec) + i)*skip_stride
-             + (bx << 1 >> xdec) + j];
-          }*/
-          mask &= *((uint32_t *)(bskip + ((by << 1) + i)*skip_stride + (bx << 1) - 1));
+          skip &= *((uint32_t *)(bskip + ((by << 1) + i)*skip_stride + (bx << 1) - 1));
         }
-#else
-        mask &= *((uint32_t *)(bskip + ((by << 1) + -1)*skip_stride + (bx << 1) - 1));
-        mask &= *((uint32_t *)(bskip + ((by << 1) + 0)*skip_stride + (bx << 1) - 1));
-        mask &= *((uint32_t *)(bskip + ((by << 1) + 1)*skip_stride + (bx << 1) - 1));
-        mask &= *((uint32_t *)(bskip + ((by << 1) + 2)*skip_stride + (bx << 1) - 1));
-#endif
-        mask &= mask >> 16;
-        mask &= mask >> 8;
-        skip = mask;
+        skip &= skip >> 16;
+        skip &= skip >> 8;
         if (skip) thresh[by][bx] = 0;
       }
     }
   }
-  /*printf("%i:\t", threshold);*/
   for (by = 0; by < nvb; by++) {
     for (bx = 0; bx < nhb; bx++) {
-      /*printf("%i ", thresh[by][bx]);*/
       (*state->opt_vtbl.filter_dering_direction)(&y[(by*ystride << bsize) +
        (bx << bsize)], ystride, &in[(by*OD_FILT_BSTRIDE << bsize) + (bx << bsize)],
        bsize, thresh[by][bx], dir[by][bx]);
     }
   }
-  /*printf("\n");*/
   /*This copy can probably be removed by looping differently for
      different directions.*/
   for (i = 0; i < n; i++) {
