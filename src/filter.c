@@ -1628,6 +1628,18 @@ void print128_num32(__m128i var) {
    val[0], val[1], val[2], val[3]);
 }
 
+OD_SIMD_INLINE void od_transpose32x4(__m128i *t0, __m128i *t1,
+ __m128i *t2, __m128i *t3) {
+  __m128i a = _mm_unpacklo_epi32(*t0, *t1);
+  __m128i b = _mm_unpacklo_epi32(*t2, *t3);
+  __m128i c = _mm_unpackhi_epi32(*t0, *t1);
+  __m128i d = _mm_unpackhi_epi32(*t2, *t3);
+  *t0 = _mm_unpacklo_epi64(a, b);
+  *t1 = _mm_unpackhi_epi64(a, b);
+  *t2 = _mm_unpacklo_epi64(c, d);
+  *t3 = _mm_unpackhi_epi64(c, d);
+}
+
 OD_SIMD_INLINE void od_transpose16x8(__m128i *t0, __m128i *t1,
  __m128i *t2, __m128i *t3,  __m128i *t4, __m128i *t5, __m128i *t6, __m128i *t7) {
   __m128i a1;
@@ -1723,7 +1735,7 @@ static int count = 0;
    in a particular direction. Since each direction have the same sum(x^2) term,
    that term is never computed. See Section 2, step 2, of:
    http://jmvalin.ca/notes/intra_paint.pdf */
-int od_dir_find8(const int16_t *img, int stride, int32_t *var) {
+static int od_dir_find8(const int16_t *img, int stride, int32_t *var) {
   int i;
   int cost[8] = {0};
   int partial[8][15+1]/* = {{0}}*/;
@@ -1758,7 +1770,7 @@ int od_dir_find8(const int16_t *img, int stride, int32_t *var) {
     row6 = _mm_srai_epi16(row6, OD_COEFF_SHIFT);
     row7 = _mm_srai_epi16(row7, OD_COEFF_SHIFT);
     /*partial[0][i + j] += x;*/
-/*jmspeex, I think instead you want to sum row1, shift the sum by 2 bytes (store those two bytes), add row2, shift the sum again by two bytes, and so on*/
+/*jmspeex: I think instead you want to sum row1, shift the sum by 2 bytes (store those two bytes), add row2, shift the sum again by two bytes, and so on*/
     tmp0 = _mm_bslli_si128(row1, 2);
     tmp1 = _mm_bslli_si128(row2, 4);
     tmp2 = _mm_bslli_si128(row3, 6);
@@ -1980,8 +1992,6 @@ uint32_t OD_DIVU_SMALL_CONSTS[OD_DIVU_DMAX][2] = {
     __m128i div_mul3 = _mm_set_epi32(0, 0xAAAAAAAB, 0, 0xAAAAAAAB);
     __m128i div_mul7 = _mm_set_epi32(0, 0x92492492, 0, 0x92492492);
     __m128i div_add7 = _mm_set_epi64x(0x92492492, 0x92492492);
-    /*__m128i div_shift_1 = _mm_set_epi64x(32+1, 32+1);
-    __m128i div_shift_2 = _mm_set_epi64x(32+2, 32+2);*/
     /*__m128i shift12 = _mm_set_epi32(1, 1, 0, 0);
     __m128i shift48 = _mm_set_epi32(3, 3, 2, 2);*/
     __m128i sum;
@@ -2153,11 +2163,13 @@ uint32_t OD_DIVU_SMALL_CONSTS[OD_DIVU_DMAX][2] = {
       cost_vec = _mm_srli_epi32(cost_vec, 3);
       cost_vec = _mm_add_epi32(cost_vec, _mm_srli_si128(cost_vec, 8));
       cost_vec = _mm_add_epi32(cost_vec, _mm_srli_si128(cost_vec, 4));
-      cost[i] = (partial[i][3] >> 3) + _mm_cvtsi128_si32(cost_vec);
+      cost[i] = _mm_cvtsi128_si32(cost_vec);
+      /*cost[i] += partial[i][3] >> 3;*/
     }
     /*for (j = 0; j < 4 + 1; j++) {
       cost[i] += M(partial[i][3 + j]) >> 3;
     }*/
+#if 0
 #if 1
     #define LOOP_BODY(index) j = index; \
     { \
@@ -2177,7 +2189,7 @@ uint32_t OD_DIVU_SMALL_CONSTS[OD_DIVU_DMAX][2] = {
         a = OD_DIVU_SMALL(a, divisor); \
 	b = OD_DIVU_SMALL(b, divisor); \
       } \
-      cost[i] += a + b; \
+      cost[i] += /*a + */b; \
     }
     LOOP_BODY(0)
     LOOP_BODY(1)
@@ -2189,6 +2201,79 @@ uint32_t OD_DIVU_SMALL_CONSTS[OD_DIVU_DMAX][2] = {
        + OD_DIVU_SMALL(partial[i][10 - j]*partial[i][10 - j], 2*j + 2);
     }
 #endif
+#endif
+  }
+  {
+    __m128i sum;
+    __m128i div2;
+    __m128i div4;
+    __m128i div6;
+    __m128i div8;
+    __m128i tmp0;
+    __m128i tmp1;
+    __m128i div_mul3;
+    div_mul3 = _mm_set_epi32(0, 0xAAAAAAAB, 0, 0xAAAAAAAB);
+    div2 = _mm_load_si128((__m128i *)(partial[1]));
+    div4 = _mm_load_si128((__m128i *)(partial[3]));
+    div6 = _mm_load_si128((__m128i *)(partial[5]));
+    div8 = _mm_load_si128((__m128i *)(partial[7]));
+    od_transpose32x4(&div2, &div4, &div6, &div8);
+    div2 = _mm_srli_epi32(div2, 1);
+    div4 = _mm_srli_epi32(div4, 2);
+    div8 = _mm_srli_epi32(div8, 3);
+    sum = div2;
+    sum = _mm_add_epi32(sum, div4);
+    sum = _mm_add_epi32(sum, div8);
+    tmp0 = _mm_mul_epu32(div6, div_mul3);
+    tmp0 = _mm_srli_epi64(tmp0, 32+2);
+    div6 = _mm_srli_si128(div6, 4);
+    tmp1 = _mm_mul_epu32(div6, div_mul3);
+    tmp1 = _mm_srli_epi64(tmp1, 32+2);
+    div6 = _mm_unpacklo_epi32(tmp0, tmp1);
+    sum = _mm_add_epi32(sum, div6);
+    div6 = _mm_unpackhi_epi32(tmp0, tmp1);
+    div6 = _mm_slli_si128(div6, 8);
+    sum = _mm_add_epi32(sum, div6);
+
+    div8 = _mm_loadu_si128((__m128i *)(partial[1]+7));
+    div6 = _mm_loadu_si128((__m128i *)(partial[3]+7));
+    div4 = _mm_loadu_si128((__m128i *)(partial[5]+7));
+    div2 = _mm_loadu_si128((__m128i *)(partial[7]+7));
+    /*div8 = _mm_set_epi32(110, 109, 108, 107);
+    div6 = _mm_set_epi32(210, 209, 208, 207);
+    div4 = _mm_set_epi32(310, 309, 308, 307);
+    div2 = _mm_set_epi32(410, 409, 408, 407);*/
+    od_transpose32x4(&div8, &div6, &div4, &div2);
+
+    div2 = _mm_srli_epi32(div2, 1);
+    div4 = _mm_srli_epi32(div4, 2);
+    sum = _mm_add_epi32(sum, div2);
+    sum = _mm_add_epi32(sum, div4);
+    tmp0 = _mm_mul_epu32(div6, div_mul3);
+    tmp0 = _mm_srli_epi64(tmp0, 32+2);
+    div6 = _mm_srli_si128(div6, 4);
+    tmp1 = _mm_mul_epu32(div6, div_mul3);
+    tmp1 = _mm_srli_epi64(tmp1, 32+2);
+    div6 = _mm_unpacklo_epi32(tmp0, tmp1);
+    sum = _mm_add_epi32(sum, div6);
+    div6 = _mm_unpackhi_epi32(tmp0, tmp1);
+    div6 = _mm_slli_si128(div6, 8);
+    sum = _mm_add_epi32(sum, div6);
+
+    cost[1] += _mm_cvtsi128_si32(sum);
+    sum = _mm_srli_si128(sum, 4);
+    cost[3] += _mm_cvtsi128_si32(sum);
+    sum = _mm_srli_si128(sum, 4);
+    cost[5] += _mm_cvtsi128_si32(sum);
+    sum = _mm_srli_si128(sum, 4);
+    cost[7] += _mm_cvtsi128_si32(sum);
+    /*if (count == 0) {
+      print128_num32(div2);
+      print128_num32(div4);
+      print128_num32(div6);
+      print128_num32(div8);
+      count++;
+    }*/
   }
   {
     __m128i dirs0;
@@ -2347,6 +2432,73 @@ static void od_compute_thresh(int thresh[OD_DERING_NBLOCKS][OD_DERING_NBLOCKS],
   }
 }
 
+static uint8_t od_quantizer_thres_table[512] = {
+  0,   1,   1,   2,   3,   3,   4,   5, 
+  5,   6,   6,   7,   8,   8,   9,   9, 
+ 10,  10,  11,  11,  12,  12,  13,  14, 
+ 14,  15,  15,  16,  16,  17,  17,  18, 
+ 18,  18,  19,  19,  20,  20,  21,  21, 
+ 22,  22,  23,  23,  24,  24,  25,  25, 
+ 26,  26,  26,  27,  27,  28,  28,  29, 
+ 29,  30,  30,  30,  31,  31,  32,  32, 
+ 33,  33,  34,  34,  34,  35,  35,  36, 
+ 36,  37,  37,  37,  38,  38,  39,  39, 
+ 39,  40,  40,  41,  41,  42,  42,  42, 
+ 43,  43,  44,  44,  44,  45,  45,  46, 
+ 46,  47,  47,  47,  48,  48,  49,  49, 
+ 49,  50,  50,  51,  51,  51,  52,  52, 
+ 53,  53,  53,  54,  54,  55,  55,  55, 
+ 56,  56,  57,  57,  57,  58,  58,  59, 
+ 59,  59,  60,  60,  60,  61,  61,  62, 
+ 62,  62,  63,  63,  64,  64,  64,  65, 
+ 65,  65,  66,  66,  67,  67,  67,  68, 
+ 68,  69,  69,  69,  70,  70,  70,  71, 
+ 71,  72,  72,  72,  73,  73,  73,  74, 
+ 74,  75,  75,  75,  76,  76,  76,  77, 
+ 77,  78,  78,  78,  79,  79,  79,  80, 
+ 80,  81,  81,  81,  82,  82,  82,  83, 
+ 83,  83,  84,  84,  85,  85,  85,  86, 
+ 86,  86,  87,  87,  87,  88,  88,  89, 
+ 89,  89,  90,  90,  90,  91,  91,  91, 
+ 92,  92,  93,  93,  93,  94,  94,  94, 
+ 95,  95,  95,  96,  96,  96,  97,  97, 
+ 98,  98,  98,  99,  99,  99, 100, 100, 
+100, 101, 101, 101, 102, 102, 102, 103, 
+103, 104, 104, 104, 105, 105, 105, 106, 
+106, 106, 107, 107, 107, 108, 108, 108, 
+109, 109, 109, 110, 110, 111, 111, 111, 
+112, 112, 112, 113, 113, 113, 114, 114, 
+114, 115, 115, 115, 116, 116, 116, 117, 
+117, 117, 118, 118, 118, 119, 119, 119, 
+120, 120, 121, 121, 121, 122, 122, 122, 
+123, 123, 123, 124, 124, 124, 125, 125, 
+125, 126, 126, 126, 127, 127, 127, 128, 
+128, 128, 129, 129, 129, 130, 130, 130, 
+131, 131, 131, 132, 132, 132, 133, 133, 
+133, 134, 134, 134, 135, 135, 135, 136, 
+136, 136, 137, 137, 137, 138, 138, 138, 
+139, 139, 139, 140, 140, 140, 141, 141, 
+141, 142, 142, 142, 143, 143, 143, 144, 
+144, 144, 145, 145, 145, 146, 146, 146, 
+147, 147, 147, 148, 148, 148, 149, 149, 
+149, 150, 150, 150, 151, 151, 151, 152, 
+152, 152, 153, 153, 153, 154, 154, 154, 
+155, 155, 155, 156, 156, 156, 157, 157, 
+157, 157, 158, 158, 158, 159, 159, 159, 
+160, 160, 160, 161, 161, 161, 162, 162, 
+162, 163, 163, 163, 164, 164, 164, 165, 
+165, 165, 166, 166, 166, 167, 167, 167, 
+168, 168, 168, 168, 169, 169, 169, 170, 
+170, 170, 171, 171, 171, 172, 172, 172, 
+173, 173, 173, 174, 174, 174, 175, 175, 
+175, 176, 176, 176, 176, 177, 177, 177, 
+178, 178, 178, 179, 179, 179, 180, 180, 
+180, 181, 181, 181, 182, 182, 182, 182, 
+183, 183, 183, 184, 184, 184, 185, 185, 
+185, 186, 186, 186, 187, 187, 187, 188, 
+188, 188, 188, 189, 189, 189, 190, 190, 
+}; 
+
 #define PREFETCH_T0(addr) _mm_prefetch(((char *)(addr)),_MM_HINT_T0)
 
 void od_dering(od_state *state, int16_t *y, int ystride, int16_t *x, int xstride, int ln,
@@ -2367,8 +2519,10 @@ void od_dering(od_state *state, int16_t *y, int ystride, int16_t *x, int xstride
   int varsum = 0;
   int32_t var[OD_DERING_NBLOCKS][OD_DERING_NBLOCKS];
   int thresh[OD_DERING_NBLOCKS][OD_DERING_NBLOCKS];
+#define FASTER_FILL 0
+#if FASTER_FILL
   __m128i very_large_vec;
-  int skipall;
+#endif
   n = 1 << ln;
   bsize = 3 - xdec;
   nhb = nvb = n >> bsize;
@@ -2376,8 +2530,9 @@ void od_dering(od_state *state, int16_t *y, int ystride, int16_t *x, int xstride
   /* We avoid filtering the pixels for which some of the pixels to average
      are outside the frame. We could change the filter instead, but it would
      add special cases for any future vectorization. */
+#if FASTER_FILL
   very_large_vec = _mm_set1_epi16(OD_DERING_VERY_LARGE);
-#define FASTER_FILL 0
+#endif
   if (sby == 0) {
     for (i = -OD_FILT_BORDER; i < 0; i++) {
       for (j = -OD_FILT_BORDER; j < n + OD_FILT_BORDER; j++) {
@@ -2519,7 +2674,18 @@ void od_dering(od_state *state, int16_t *y, int ystride, int16_t *x, int xstride
      value here comes from observing that on ntt-short, the best threshold for
      -v 5 appeared to be around 0.5*q, while the best threshold for -v 400
      was 0.25*q, i.e. 1-log(.5/.25)/log(400/5) = 0.84182 */
-  threshold = 1.0*pow(q, 0.84182);
+  /*threshold = 1.0*pow(q, 0.84182);*/
+  threshold = od_quantizer_thres_table[q];
+  /*if (count == 0) {
+    printf("{");
+    for (i = 0; i < 512; i++) {
+      if (i%8 == 0)      
+        printf("\n");
+      printf("%3i, ", (int)(1.0*pow(i, 0.84182)));
+    }
+    printf("\n} \n");
+    count++;
+  }*/
   if (pli == 0) {
     for (by = 0; by < nvb; by++) {
       for (bx = 0; bx < nhb; bx++) {
