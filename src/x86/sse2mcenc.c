@@ -290,4 +290,49 @@ int32_t od_mc_compute_satd8_8x8_sse2(const unsigned char *src, int systride,
   return satd;
 }
 
+int32_t od_mc_compute_satd8_16x16_sse2(const unsigned char *src, int systride,
+ const unsigned char *ref, int rystride) {
+  int32_t satd;
+  int i;
+  int j;
+  satd = 0;
+  for (i = 0; i < 16; i += 8) {
+    for (j = 0; j < 16; j += 8) {
+      satd += od_mc_compute_satd8_8x8_sse2(src + i*systride + j, systride,
+       ref + i*rystride + j, rystride);
+    }
+  }
+  return satd;
+}
+
+int32_t od_mc_compute_satd8_32x32_sse2(const unsigned char *src, int systride,
+ const unsigned char *ref, int rystride) {
+  int32_t satd;
+  int i;
+  int j;
+  satd = 0;
+  for (i = 0; i < 32; i += 8) {
+    for (j = 0; j < 32; j += 8) {
+      satd += od_mc_compute_satd8_8x8_sse2(src + i*systride + j, systride,
+       ref + i*rystride + j, rystride);
+    }
+  }
+  return satd;
+}
+
+int32_t od_mc_compute_satd8_64x64_sse2(const unsigned char *src, int systride,
+ const unsigned char *ref, int rystride) {
+  int32_t satd;
+  int i;
+  int j;
+  satd = 0;
+  for (i = 0; i < 64; i += 8) {
+    for (j = 0; j < 64; j += 8) {
+      satd += od_mc_compute_satd8_8x8_sse2(src + i*systride + j, systride,
+       ref + i*rystride + j, rystride);
+    }
+  }
+  return satd;
+}
+
 #endif
