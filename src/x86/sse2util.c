@@ -150,4 +150,5 @@ void od_copy_64x64_8_sse2(unsigned char *_dst, int _dstride,
     );
   }
 }
+
 #endif

@@ -37,13 +37,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 #endif
 #include "block_size.h"
 
-/* OD_DC_RES[i] adjusts the quantization of DC for the ith plane.
-   These values are based on manual tuning to optimize PSNR-HVS, while also
-   attempting to keep a good visual balance between the relative resolution
-   of luma, and chroma.
-   FIXME: Tune this properly, see also OD_DEFAULT_QMS.*/
-const od_coeff OD_DC_RES[3] = {17, 24, 17};
-
 /* Scaling compensation for the Haar equivalent basis function. Left is
    for horizontal/vertical. Right is for diagonal. */
 #if OD_DISABLE_FILTER || OD_DEBLOCKING
@@ -67,14 +60,16 @@ const int OD_HAAR_QM[2][OD_LOG_BSIZE_MAX] = {
 
 void *od_aligned_malloc(size_t _sz,size_t _align) {
   unsigned char *p;
-  if (_align - 1 > UCHAR_MAX || (_align&_align-1) || _sz > ~(size_t)0-_align)
+  if (_align - 1 > UCHAR_MAX || (_align & (_align - 1))
+   || _sz > ~(size_t)0 - _align) {
     return NULL;
+  }
   p = (unsigned char *)malloc(_sz + _align);
   if (p != NULL) {
     int offs;
-    offs = ((p-(unsigned char *)0) - 1 & _align - 1);
+    offs = ((p - (unsigned char *)0) - 1) & (_align - 1);
     p[offs] = offs;
-    p += offs+1;
+    p += offs + 1;
   }
   return p;
 }
@@ -165,7 +160,7 @@ void od_img_plane_copy(od_img* dst, od_img* src, int pli) {
           dnshift = src_plane->bitdepth - dst_plane->bitdepth;
           for (x = 0; x < w; x++) {
             *(int16_t *)dst_ptr = OD_CLAMPI(0,
-             *(int16_t *)src_ptr + (1 << dnshift >> 1) >> dnshift,
+             (*(int16_t *)src_ptr + (1 << dnshift >> 1)) >> dnshift,
              (1 << dst_plane->bitdepth) - 1);
             src_ptr += src_xstride;
             dst_ptr += dst_xstride;
@@ -178,8 +173,8 @@ void od_img_plane_copy(od_img* dst, od_img* src, int pli) {
         dnshift = src_plane->bitdepth - 8;
         OD_ASSERT(dst_plane->bitdepth == 8);
         for (x = 0; x < w; x++) {
-          *dst_ptr = OD_CLAMP255(*(int16_t *)src_ptr
-           + (1 << dnshift >> 1) >> dnshift);
+          *dst_ptr = OD_CLAMP255((*(int16_t *)src_ptr
+           + (1 << dnshift >> 1)) >> dnshift);
           src_ptr += src_xstride;
           dst_ptr += dst_xstride;
         }
@@ -385,8 +380,9 @@ static int od_state_init_impl(od_state *state, const daala_info *info) {
     FPR must be on for high-depth, including lossless high-depth.
     When FPR is on for 8-bit or 10-bit content, lossless frames are still
      stored with 8 + OD_COEFF_SHIFT bit depth to allow streams with mixed lossy
-     and lossless frames.*/
-  state->full_precision_references = 1;
+     and lossless frames.
+    FIXME: Switch on when FPR SIMD lands.*/
+  state->full_precision_references = 0;
   od_state_opt_vtbl_init(state);
   if (OD_UNLIKELY(od_state_ref_imgs_init(state, 4))) {
     return OD_EFAULT;
@@ -453,6 +449,9 @@ static int od_state_init_impl(od_state *state, const daala_info *info) {
     else state->lbuf[pli] = state->ltmp[pli] = NULL;
     state->bskip[pli] = (unsigned char *)malloc(sizeof(*state->bskip)*
      state->nhsb*state->nvsb<<(2*(OD_NBSIZES-1) - xdec - ydec));
+    if (OD_UNLIKELY(!state->bskip[pli])) {
+      return OD_EFAULT;
+    }
   }
   state->bsize = (unsigned char *)malloc(
    sizeof(*state->bsize)*(state->nhsb + 2)*4*(state->nvsb + 2)*4);
@@ -466,13 +465,15 @@ static int od_state_init_impl(od_state *state, const daala_info *info) {
   state->dump_tags = 0;
   state->dump_files = 0;
 #endif
-  state->dering_flags = (unsigned char *)malloc(state->nhsb * state->nvsb);
-  if (OD_UNLIKELY(!state->dering_flags)) {
-    return OD_EFAULT;
-  }
-  state->sb_skip_flags = (unsigned char *)malloc(state->nhsb * state->nvsb);
-  if (OD_UNLIKELY(!state->sb_skip_flags)) {
-    return OD_EFAULT;
+  {
+    int nhdr;
+    int nvdr;
+    nhdr = state->frame_width >> (OD_LOG_DERING_GRID + OD_LOG_BSIZE0);
+    nvdr = state->frame_height >> (OD_LOG_DERING_GRID + OD_LOG_BSIZE0);
+    state->dering_flags = (unsigned char *)malloc(nhdr * nvdr);
+    if (OD_UNLIKELY(!state->dering_flags)) {
+      return OD_EFAULT;
+    }
   }
   state->sb_q_scaling = (unsigned char *)malloc(state->nhsb * state->nvsb);
   if (OD_UNLIKELY(!state->sb_q_scaling)) {
@@ -516,7 +517,6 @@ void od_state_clear(od_state *state) {
   free(state->bsize);
   for (pli = 0; pli < 3; pli++) free(state->bskip[pli]);
   free(state->dering_flags);
-  free(state->sb_skip_flags);
   free(state->sb_q_scaling);
 }
 
@@ -692,8 +692,8 @@ void od_state_pred_block_from_setup(od_state *state,
   dxp = OD_VERT_SETUP_DX[oc][s];
   dyp = OD_VERT_SETUP_DY[oc][s];
   for (k = 0; k < 4; k++) {
-    grid[k] = state->mv_grid[vy + (dyp[k] << log_mvb_sz)]
-     + vx + (dxp[k] << log_mvb_sz);
+    grid[k] = state->mv_grid[vy + (dyp[k]*(1 << log_mvb_sz))]
+     + vx + (dxp[k]*(1 << log_mvb_sz));
     mvx[k] = (int32_t)OD_DIV_POW2_RE(grid[k]->mv[0], xdec);
     mvy[k] = (int32_t)OD_DIV_POW2_RE(grid[k]->mv[1], ydec);
     iplane = state->ref_imgs[state->ref_imgi[grid[k]->ref]].planes+pli;
@@ -832,8 +832,8 @@ int od_state_dump_yuv(od_state *state, od_img *img, const char *tag) {
       if (xstride > 1) {
         for (x = 0; x < (pic_width + xdec) >> xdec; x++) {
           int value;
-          value = *((int16_t *)(img->planes[pli].data + ystride*y + xstride*x))
-           + (1 << img->planes[pli].bitdepth - 9)
+          value = (*((int16_t *)(img->planes[pli].data + ystride*y + xstride*x))
+           + (1 << (img->planes[pli].bitdepth - 9)))
            >> (img->planes[pli].bitdepth - 8);
           if (fputc(OD_CLAMP255(value), fp) == EOF) {
             fprintf(stderr, "Error writing to \"%s\".\n", fname);
@@ -1085,8 +1085,8 @@ static void od_img_plane_edge_ext(od_img_plane *dst_p,
   dst_data = dst_p->data;
 
   OD_ASSERT((horz_padding&1) == 0);
-  OD_ASSERT(xstride == 1 && dst_p->bitdepth == 8
-   || xstride == 2 && dst_p->bitdepth > 8);
+  OD_ASSERT((xstride == 1 && dst_p->bitdepth == 8)
+   || (xstride == 2 && dst_p->bitdepth > 8));
   /*Left side.*/
   for (y = 0; y < plane_height; y++) {
     dst = dst_data + ystride*y;
@@ -1165,7 +1165,7 @@ void od_ref_buf_to_coeff(od_state *state,
      OD_COEFF_SHIFT;
     for (y = 0; y < h; y++) {
       for (x = 0; x < w; x++) {
-        dst[x] = src[x] - 128 << coeff_shift;
+        dst[x] = (src[x] - 128)*(1 << coeff_shift);
       }
       dst += dst_ystride;
       src += src_ystride;
@@ -1180,8 +1180,8 @@ void od_ref_buf_to_coeff(od_state *state,
      0;
     for (y = 0; y < h; y++) {
       for (x = 0; x < w; x++) {
-        dst[x] = ((int16_t *)src)[x] - (1 << 8 + OD_COEFF_SHIFT >> 1)
-         + (1 << coeff_shift >> 1) >> coeff_shift;
+        dst[x] = (((int16_t *)src)[x] - (1 << (8 + OD_COEFF_SHIFT) >> 1)
+         + (1 << coeff_shift >> 1)) >> coeff_shift;
       }
       dst += dst_ystride;
       src += src_ystride;
@@ -1231,7 +1231,8 @@ void od_coeff_to_ref_buf(od_state *state,
     for (y = 0; y < h; y++) {
       for (x = 0; x < w; x++) {
         *(dst + x) =
-         OD_CLAMP255((src[x] + (1 << coeff_shift >> 1) >> coeff_shift) + 128);
+         OD_CLAMP255(((src[x] + (1 << coeff_shift >> 1)) >> coeff_shift) +
+         128);
       }
       dst += dst_ystride;
       src += src_ystride;
@@ -1248,7 +1249,7 @@ void od_coeff_to_ref_buf(od_state *state,
     for (y = 0; y < h; y++) {
       for (x = 0; x < w; x++) {
         ((int16_t *)dst)[x] =
-         (src[x] << coeff_shift) + (1 << 8 + OD_COEFF_SHIFT >> 1);
+          OD_CLAMPFPR((src[x]*(1 << coeff_shift)) + (128 << OD_COEFF_SHIFT));
       }
       dst += dst_ystride;
       src += src_ystride;

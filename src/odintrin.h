@@ -105,6 +105,12 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
   This assumes a char is 8 bits.*/
 # define OD_CLAMP255(x) \
   ((unsigned char)((((x) < 0) - 1) & ((x) | -((x) > 255))))
+/*Clamps a signed integer to between 0 and (1 << 8 + OD_COEFF_SHIFT) - 1,
+   returning an uint16_t.*/
+# define OD_CLAMPFPR(x) \
+  ((uint16_t)((((x) < 0) - 1) & \
+  ((x) | -((x) > (1 << (8 + OD_COEFF_SHIFT)) - 1)) & \
+  ((1 << (8 + OD_COEFF_SHIFT)) - 1)))
 /*Divides a signed integer by a positive value with exact rounding.*/
 # define OD_DIV_ROUND(x, y) (((x) + OD_FLIPSIGNI((y) >> 1, x))/(y))
 # define OD_DIV_R0(x, y) (((x) + OD_FLIPSIGNI((((y) + 1) >> 1) - 1, (x)))/(y))
@@ -134,7 +140,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 # define OD_DIV2_RE(x) ((x) + ((x) >> 1 & 1) >> 1)
 /*Divides a x by (1 << (shift)), rounding towards even numbers.*/
 # define OD_DIV_POW2_RE(x, shift) \
-  ((x) + (((1 << (shift)) + ((x) >> (shift) & 1) - 1) >> 1) >> (shift))
+  (((x) + (((1 << (shift)) + ((x) >> (shift) & 1) - 1) >> 1)) >> (shift))
 /*Count leading zeros.
   This macro should only be used for implementing od_ilog(), if it is defined.
   All other code should use OD_ILOG() instead.*/

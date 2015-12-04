@@ -65,6 +65,10 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 # define OD_LOG_MVBSIZE_MIN (3)
 # define OD_MVBSIZE_MIN (1 << OD_LOG_MVBSIZE_MIN)
 
+/*The deringing filter is applied on 8x8 blocks, but it's application
+   is signaled on a 32x32 grid.*/
+# define OD_LOG_DERING_GRID (OD_BLOCK_32X32)
+
 /*The log of the maximum length of the side of a block that
    has optimized copy variants.*/
 # define OD_LOG_COPYBSIZE_MAX (6)
@@ -101,11 +105,13 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 # define OD_SIGNAL_Q_SCALING (1)
 
 # define OD_COEFF_SHIFT (4)
+# define OD_COEFF_SCALE (1 << OD_COEFF_SHIFT)
 /*OD_QUALITY_SHIFT specifies the number of fractional bits in a
    passed in 'quality' parameter.
   For example, an OD_QUALITY_SHIFT of (4) specifies the quality parameter is
    in Q4 format.*/
 # define OD_QUALITY_SHIFT (4)
+# define OD_LOSSLESS(_ctx, _pli) (_ctx->state.quantizer[_pli] == 0)
 
 # if defined(OD_ENABLE_ASSERTIONS)
 #  if OD_GNUC_PREREQ(2, 5, 0)

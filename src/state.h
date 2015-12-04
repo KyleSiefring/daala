@@ -40,8 +40,6 @@ typedef struct od_adapt_ctx      od_adapt_ctx;
 # include "util.h"
 # include "intra.h"
 
-extern const od_coeff OD_DC_RES[3];
-
 extern const od_coeff OD_DC_QM[OD_NBSIZES - 1][2];
 
 extern const int OD_HAAR_QM[2][OD_LOG_BSIZE_MAX];
@@ -218,11 +216,12 @@ struct od_state{
   od_coeff *mdtmp[OD_NPLANES_MAX];
   od_coeff *ltmp[OD_NPLANES_MAX];
   od_coeff *lbuf[OD_NPLANES_MAX];
+  int quantizer[OD_NPLANES_MAX];
+  int coded_quantizer[OD_NPLANES_MAX];
   unsigned char pvq_qm_q4[OD_NPLANES_MAX][OD_QM_SIZE];
   /*Array of flags to enable the dering filter per block.
     1 to enable (default), 0 to disable.*/
   unsigned char *dering_flags;
-  unsigned char *sb_skip_flags;
   /*This provides context for the quantizer CDF.*/
   unsigned char *sb_q_scaling;
 };
