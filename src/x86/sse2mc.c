@@ -203,6 +203,8 @@ void od_mc_predict1fmv16_check(od_state *state, unsigned char *_dst,
   int failed;
   int i;
   int j;
+  int _dst_val;
+  int dst_val;
   xblk_sz = 1 << _log_xblk_sz;
   yblk_sz = 1 << _log_yblk_sz;
   failed = 0;
@@ -210,8 +212,6 @@ void od_mc_predict1fmv16_check(od_state *state, unsigned char *_dst,
    _log_xblk_sz, _log_yblk_sz);
   for (j = 0; j < yblk_sz; j++) {
     for (i = 0; i < xblk_sz; i++) {
-      int _dst_val;
-      int dst_val;
       _dst_val = ((int16_t *)_dst)[i + (j << _log_xblk_sz)];
       dst_val = ((int16_t *)dst)[i + (j << _log_xblk_sz)];
       if (_dst_val != dst_val) {
@@ -244,7 +244,7 @@ OD_SIMD_INLINE void od_setup_alternating_filter_variables(
   *filter_45 = _mm_set1_epi32(f[2]);
 }
 
-OD_SIMD_INLINE __m128i od_mc_multiply_reduce_add_horizontal_4(
+OD_SIMD_INLINE __m128i od_mc_multiply_reduce_add_horizontal8_4(
  __m128i src_vec, __m128i fx01, __m128i fx23, __m128i fx45) {
   __m128i src8pels;
   __m128i sums;
@@ -300,7 +300,7 @@ OD_SIMD_INLINE void od_mc_predict1fmv8_horizontal_nxm(int16_t *buff_p,
         __m128i tmp;
         __m128i sums;
         tmp = _mm_loadu_si128((__m128i *)(src_p + i - OD_SUBPEL_TOP_APRON_SZ));
-        sums = od_mc_multiply_reduce_add_horizontal_4(tmp, fx01, fx23, fx45);
+        sums = od_mc_multiply_reduce_add_horizontal8_4(tmp, fx01, fx23, fx45);
         /*Only store as many values as xblk_sz.*/
         if (xblk_sz >= 4) {
           OD_ASSERT(i + 4 <= xblk_sz);
@@ -576,12 +576,10 @@ void od_mc_predict1fmv8_sse2(od_state *state, unsigned char *dst,
 #if defined(OD_CHECKASM)
   od_mc_predict1fmv8_check(state, dst, src, systride, mvx, mvy,
    log_xblk_sz, log_yblk_sz);
-  /*fprintf(stderr,"od_mc_predict1fmv8 %ix%i check finished.\n",
-   1<<_log_xblk_sz,1<<_log_yblk_sz);*/
 #endif
 }
 
-OD_SIMD_INLINE __m128i od_mc_multiply_reduce_add_horizontal_4_16bit(
+OD_SIMD_INLINE __m128i od_mc_multiply_reduce_add_horizontal16_4(
  __m128i src_vec0, __m128i src_vec1, __m128i fx01, __m128i fx23, __m128i fx45) {
   __m128i src8pels;
   __m128i sums;
@@ -595,7 +593,7 @@ OD_SIMD_INLINE __m128i od_mc_multiply_reduce_add_horizontal_4_16bit(
     Perform these operations for each pair of filter values.*/
   src8pels = _mm_unpacklo_epi16(src_vec0, src_vec1);
   madd01 = _mm_madd_epi16(fx01, src8pels);
-  /*The src data that is to multiplied by the final filters can be obtained
+  /*The src data that is to be multiplied by the final filters can be obtained
      by unpacking the upper values of the vector we begin with instead
      of shifting.*/
   src8pels = _mm_unpackhi_epi16(src_vec0, src_vec1);
@@ -607,7 +605,7 @@ OD_SIMD_INLINE __m128i od_mc_multiply_reduce_add_horizontal_4_16bit(
   /*Subtract from one of the summands instead of the final value to avoid
     data hazards.*/
   madd01 = _mm_sub_epi32(madd01,
-   _mm_set1_epi32(128 << OD_COEFF_SHIFT + OD_SUBPEL_COEFF_SCALE));
+   _mm_set1_epi32(128 << (OD_COEFF_SHIFT + OD_SUBPEL_COEFF_SCALE)));
   /*Sum together the 3 summands.*/
   sums = _mm_add_epi32(madd01, madd23);
   sums = _mm_add_epi32(sums, madd45);
@@ -645,7 +643,7 @@ OD_SIMD_INLINE void od_mc_predict1fmv16_horizontal_nxm(int32_t *buff_p,
          (__m128i *)(((int16_t *)src_p) + i - OD_SUBPEL_TOP_APRON_SZ));
         src1 = _mm_loadu_si128(
          (__m128i *)(((int16_t *)src_p) + i + 1 - OD_SUBPEL_TOP_APRON_SZ));
-        sums = od_mc_multiply_reduce_add_horizontal_4_16bit(src0, src1,
+        sums = od_mc_multiply_reduce_add_horizontal16_4(src0, src1,
          fx01, fx23, fx45);
         /*Only store as many values as xblk_sz.*/
         if (xblk_sz >= 4) {
@@ -727,11 +725,13 @@ static void od_mc_predict1fmv16_horizontal_64x64(int32_t *buff_p,
 typedef void (*od_mc_predict1fmv16_horizontal_fixed_func)(int32_t *buff_p,
  const unsigned char *src_p, int systride, int mvxf, int mvyf);
 
+/*Found in this thread:
+   https://software.intel.com/en-us/forums/intel-c-compiler/topic/288768*/
 OD_SIMD_INLINE __m128i od_mm128i_mullo_epi32(const __m128i a, const __m128i b) {
   __m128i prod0;
   __m128i prod1;
   prod0 = _mm_mul_epu32(a, b);
-  prod1 = _mm_mul_epu32(_mm_srli_si128(a,4), _mm_srli_si128(b,4));
+  prod1 = _mm_mul_epu32(_mm_srli_si128(a, 4), _mm_srli_si128(b, 4));
   return _mm_unpacklo_epi32(_mm_shuffle_epi32(prod0, _MM_SHUFFLE(0, 0, 2, 0)),
    _mm_shuffle_epi32(prod1, _MM_SHUFFLE(0, 0, 2, 0)));
 }
@@ -807,30 +807,30 @@ void od_mc_predict1fmv16_sse2(od_state *state, unsigned char *dst,
           __m128i sums;
           __m128i out;
           OD_ASSERT((buff_p + i + ((0 - OD_SUBPEL_TOP_APRON_SZ)*xblk_sz) + 15)
-           < buff + sizeof(buff));
+           < buff + sizeof(buff)/sizeof(buff[0]));
           OD_ASSERT((buff_p + i + ((1 - OD_SUBPEL_TOP_APRON_SZ)*xblk_sz) + 15)
-           < buff + sizeof(buff));
+           < buff + sizeof(buff)/sizeof(buff[0]));
           OD_ASSERT((buff_p + i + ((2 - OD_SUBPEL_TOP_APRON_SZ)*xblk_sz) + 15)
-           < buff + sizeof(buff));
+           < buff + sizeof(buff)/sizeof(buff[0]));
           OD_ASSERT((buff_p + i + ((3 - OD_SUBPEL_TOP_APRON_SZ)*xblk_sz) + 15)
-           < buff + sizeof(buff));
+           < buff + sizeof(buff)/sizeof(buff[0]));
           OD_ASSERT((buff_p + i + ((4 - OD_SUBPEL_TOP_APRON_SZ)*xblk_sz) + 15)
-           < buff + sizeof(buff));
+           < buff + sizeof(buff)/sizeof(buff[0]));
           OD_ASSERT((buff_p + i + ((5 - OD_SUBPEL_TOP_APRON_SZ)*xblk_sz) + 15)
-           < buff + sizeof(buff));
+           < buff + sizeof(buff)/sizeof(buff[0]));
           /*Load input coeffs from each row, 4 32-bit integers at one time.*/
           row0 = _mm_loadu_si128((__m128i *)
-           (buff_p + i + ((0 - OD_SUBPEL_TOP_APRON_SZ) << log_xblk_sz)));
+           (buff_p + i + ((0 - OD_SUBPEL_TOP_APRON_SZ)*(1 << log_xblk_sz))));
           row1 = _mm_loadu_si128((__m128i *)
-           (buff_p + i + ((1 - OD_SUBPEL_TOP_APRON_SZ) << log_xblk_sz)));
+           (buff_p + i + ((1 - OD_SUBPEL_TOP_APRON_SZ)*(1 << log_xblk_sz))));
           row2 = _mm_loadu_si128((__m128i *)
-           (buff_p + i + ((2 - OD_SUBPEL_TOP_APRON_SZ) << log_xblk_sz)));
+           (buff_p + i + ((2 - OD_SUBPEL_TOP_APRON_SZ)*(1 << log_xblk_sz))));
           row3 = _mm_loadu_si128((__m128i *)
-           (buff_p + i + ((3 - OD_SUBPEL_TOP_APRON_SZ) << log_xblk_sz)));
+           (buff_p + i + ((3 - OD_SUBPEL_TOP_APRON_SZ)*(1 << log_xblk_sz))));
           row4 = _mm_loadu_si128((__m128i *)
-           (buff_p + i + ((4 - OD_SUBPEL_TOP_APRON_SZ) << log_xblk_sz)));
+           (buff_p + i + ((4 - OD_SUBPEL_TOP_APRON_SZ)*(1 << log_xblk_sz))));
           row5 = _mm_loadu_si128((__m128i *)
-           (buff_p + i + ((5 - OD_SUBPEL_TOP_APRON_SZ) << log_xblk_sz)));
+           (buff_p + i + ((5 - OD_SUBPEL_TOP_APRON_SZ)*(1 << log_xblk_sz))));
           /*Multiply each row with the cooresponding filter value.*/
           row0 = od_mm128i_mullo_epi32(row0, _mm_set1_epi32(fy[0]));
           row1 = od_mm128i_mullo_epi32(row1, _mm_set1_epi32(fy[1]));
@@ -847,9 +847,13 @@ void od_mc_predict1fmv16_sse2(od_state *state, unsigned char *dst,
           /*Scale down while rounding and recenter.*/
           sums = _mm_add_epi32(sums,
            _mm_set1_epi32((1 << OD_SUBPEL_COEFF_SCALE2 >> 1) +
-           (128 << OD_COEFF_SHIFT << OD_SUBPEL_COEFF_SCALE2)));
+           (128 << (OD_COEFF_SHIFT + OD_SUBPEL_COEFF_SCALE2))));
           sums = _mm_srai_epi32(sums, OD_SUBPEL_COEFF_SCALE2);
           out = _mm_packs_epi32(sums, sums);
+          /*Clamp to 12 bit range.*/
+          out = _mm_min_epi16(out,
+           _mm_set1_epi16((1 << (8 + OD_COEFF_SHIFT)) - 1));
+          out = _mm_max_epi16(out, _mm_set1_epi16(0));
           if (xblk_sz >= 4) {
             OD_ASSERT(i + 4 <= xblk_sz);
             _mm_storel_epi64((__m128i *)(((int16_t *)dst_p) + i), out);
@@ -872,9 +876,13 @@ void od_mc_predict1fmv16_sse2(od_state *state, unsigned char *dst,
           /*Scale down while rounding and recenter.*/
           p = _mm_add_epi32(p,
            _mm_set1_epi32((1 << OD_SUBPEL_COEFF_SCALE >> 1) +
-           (128 << OD_COEFF_SHIFT << OD_SUBPEL_COEFF_SCALE)));
+           (128 << (OD_COEFF_SHIFT + OD_SUBPEL_COEFF_SCALE))));
           p = _mm_srai_epi32(p, OD_SUBPEL_COEFF_SCALE);
           p = _mm_packs_epi32(p, p);
+          /*Clamp to 12 bit range.*/
+          p = _mm_min_epi16(p,
+           _mm_set1_epi16((1 << (8 + OD_COEFF_SHIFT)) - 1));
+          p = _mm_max_epi16(p, _mm_set1_epi16(0));
           if (xblk_sz >= 4) {
             OD_ASSERT(i + 4 <= xblk_sz);
             _mm_storel_epi64((__m128i *)(((int16_t *)dst_p) + i), p);
@@ -898,8 +906,6 @@ void od_mc_predict1fmv16_sse2(od_state *state, unsigned char *dst,
 #if defined(OD_CHECKASM)
   od_mc_predict1fmv16_check(state, dst, src, systride, mvx, mvy,
    log_xblk_sz, log_yblk_sz);
-  /*fprintf(stderr,"od_mc_predict1fmv8 %ix%i check finished.\n",
-   1<<_log_xblk_sz,1<<_log_yblk_sz);*/
 #endif
 }
 
