@@ -382,7 +382,7 @@ static int od_state_init_impl(od_state *state, const daala_info *info) {
      stored with 8 + OD_COEFF_SHIFT bit depth to allow streams with mixed lossy
      and lossless frames.
     FIXME: Switch on when FPR SIMD lands.*/
-  state->full_precision_references = 0;
+  state->full_precision_references = 1;
   od_state_opt_vtbl_init(state);
   if (OD_UNLIKELY(od_state_ref_imgs_init(state, 4))) {
     return OD_EFAULT;
