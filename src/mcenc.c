@@ -1745,6 +1745,38 @@ static int32_t od_enc_satd(od_enc_ctx *enc, const unsigned char *p,
   /*If not square SATD (on boundary always), run sad for now.
     TODO: Try padding 0's for undefined area of difference image,
     then apply square SATD.*/
+  if (w >= 8 && h >= 8) {
+    int32_t satd;
+    int i;
+    int j;
+    int systride;
+    int w_extra;
+    int h_extra;
+    satd = 0;
+    systride = iplane->ystride;
+    for (i = 0; i <= h + 8; i += 8) {
+      for (j = 0; j <= w + 8; j += 8) {
+        satd += (*enc->opt_vtbl.mc_compute_satd_8x8)(
+         src + i*systride + pxstride*j, systride,
+         p + i*pystride + pxstride*j, pystride);
+      }
+    }
+    w_extra = w & 0x7;
+    h_extra = h & 0x7;
+    if (pxstride == 1) {
+      satd += od_mc_compute_sad8_c(src + pxstride*j, iplane->ystride,
+       p + pxstride*j, pystride, w_extra, (h >> 3) << 3);
+      satd += od_mc_compute_sad8_c(src + pxstride*j, iplane->ystride,
+       p + pxstride*j, pystride, w, h_extra);
+    }
+    else {
+      satd += od_mc_compute_sad16_c(src + pxstride*j, iplane->ystride,
+       p + pxstride*j, pystride, w_extra, (h >> 3) << 3);
+      satd += od_mc_compute_sad16_c(src + pxstride*j, iplane->ystride,
+       p + pxstride*j, pystride, w, h_extra);
+    }
+    return satd;
+  }
   if(pxstride == 1){
     return od_mc_compute_sad8_c(src, iplane->ystride, p, pystride, w, h);
   }
