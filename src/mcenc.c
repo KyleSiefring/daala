@@ -1754,8 +1754,8 @@ static int32_t od_enc_satd(od_enc_ctx *enc, const unsigned char *p,
     int h_extra;
     satd = 0;
     systride = iplane->ystride;
-    for (i = 0; i <= h + 8; i += 8) {
-      for (j = 0; j <= w + 8; j += 8) {
+    for (i = 0; i + 8 <= h; i += 8) {
+      for (j = 0; j + 8 <= w; j += 8) {
         satd += (*enc->opt_vtbl.mc_compute_satd_8x8)(
          src + i*systride + pxstride*j, systride,
          p + i*pystride + pxstride*j, pystride);
