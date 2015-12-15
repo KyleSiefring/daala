@@ -435,6 +435,42 @@ int32_t od_mc_compute_satd16_4x4_sse2(const unsigned char *src, int systride,
   return satd;
 }
 
+/*Transpose 8 vectors with 8 16-bit values.*/
+OD_SIMD_INLINE void od_partial_transpose16x8(__m128i *t0, __m128i *t1,
+ __m128i *t2, __m128i *t3,  __m128i *t4, __m128i *t5,
+ __m128i *t6, __m128i *t7) {
+  __m128i a0;
+  __m128i b0;
+  __m128i c0;
+  __m128i d0;
+  __m128i e0;
+  __m128i f0;
+  __m128i g0;
+  __m128i h0;
+  /*00112233*/
+  a0 = _mm_unpacklo_epi16(*t0, *t1);
+  b0 = _mm_unpacklo_epi16(*t2, *t3);
+  c0 = _mm_unpacklo_epi16(*t4, *t5);
+  d0 = _mm_unpacklo_epi16(*t6, *t7);
+  /*44556677*/
+  e0 = _mm_unpackhi_epi16(*t0, *t1);
+  f0 = _mm_unpackhi_epi16(*t2, *t3);
+  g0 = _mm_unpackhi_epi16(*t4, *t5);
+  h0 = _mm_unpackhi_epi16(*t6, *t7);
+  /*00001111*/
+  *t0 = _mm_unpacklo_epi32(a0, b0);
+  *t1 = _mm_unpacklo_epi32(c0, d0);
+  /*22223333*/
+  *t2 = _mm_unpackhi_epi32(a0, b0);
+  *t3 = _mm_unpackhi_epi32(c0, d0);
+  /*44445555*/
+  *t4 = _mm_unpacklo_epi32(e0, f0);
+  *t5 = _mm_unpacklo_epi32(g0, h0);
+  /*66667777*/
+  *t6 = _mm_unpackhi_epi32(e0, f0);
+  *t7 = _mm_unpackhi_epi32(g0, h0);
+}
+
 /*(Does not)Correspond to _mm_cvtepi16_epi32 (sse4.1).*/
 OD_SIMD_INLINE void od_cvti16x8_i32x8(__m128i in,
  __m128i *out0, __m128i *out1) {
@@ -489,16 +525,17 @@ OD_SIMD_INLINE int32_t od_mc_compute_satd16_8x8_part(const unsigned char *src, i
   od_mc_butterfly_2x2_16x8(&c, &d, &g, &h);
   od_mc_butterfly_2x2_16x8(&a, &b, &e, &f);
   od_mc_butterfly_2x2_16x8(&c, &d, &g, &h);
-  od_transpose16x8(&a, &c, &b, &d, &e, &g, &f, &h);
+  /*od_transpose16x8(&a, &c, &b, &d, &e, &g, &f, &h);*/
+  od_partial_transpose16x8(&a, &c, &b, &d, &e, &g, &f, &h);
   /*Convert to 32-bit integers.*/
-  od_cvti16x8_i32x8(a, &a, &a_buf);
-  od_cvti16x8_i32x8(b, &b, &b_buf);
-  od_cvti16x8_i32x8(c, &c, &c_buf);
-  od_cvti16x8_i32x8(d, &d, &d_buf);
-  od_cvti16x8_i32x8(e, &e, &e_buf);
-  od_cvti16x8_i32x8(f, &f, &f_buf);
-  od_cvti16x8_i32x8(g, &g, &g_buf);
-  od_cvti16x8_i32x8(h, &h, &h_buf);
+  a_buf = c;
+  c_buf = d;
+  e_buf = g;
+  g_buf = h;
+  od_cvti16x8_i32x8(a, &a, &c);
+  od_cvti16x8_i32x8(b, &b, &d);
+  od_cvti16x8_i32x8(e, &e, &g);
+  od_cvti16x8_i32x8(f, &f, &h); 
   /*Horizontal 1D transform (1st half).*/
   od_mc_butterfly_2x2_32x4(&a, &b, &c, &d);
   od_mc_butterfly_2x2_32x4(&e, &f, &g, &h);
@@ -524,14 +561,10 @@ OD_SIMD_INLINE int32_t od_mc_compute_satd16_8x8_part(const unsigned char *src, i
   e = _mm_add_epi32(e, g);
   a = _mm_add_epi32(a, e);
   sums = a;
-  a = a_buf;
-  b = b_buf;
-  c = c_buf;
-  d = d_buf;
-  e = e_buf;
-  f = f_buf;
-  g = g_buf;
-  h = h_buf;
+  od_cvti16x8_i32x8(a_buf, &a, &c);
+  od_cvti16x8_i32x8(c_buf, &b, &d);
+  od_cvti16x8_i32x8(e_buf, &e, &g);
+  od_cvti16x8_i32x8(g_buf, &f, &h);
   /*Horizontal 1D transform (2nd half).*/
   od_mc_butterfly_2x2_32x4(&a, &b, &c, &d);
   od_mc_butterfly_2x2_32x4(&e, &f, &g, &h);
