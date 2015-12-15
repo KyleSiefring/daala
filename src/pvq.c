@@ -287,11 +287,11 @@ void od_adapt_pvq_ctx_reset(od_pvq_adapt_ctx *state, int is_keyframe) {
 
 }
 
-/* QMs are arranged from smallest to largest blocksizes, for decimation=0,
-   and again for decimation=1.*/
+/* QMs are arranged from smallest to largest blocksizes, first for
+   blocks with decimation=0, followed by blocks with decimation=1.*/
 int od_qm_offset(int bs, int xydec)
 {
-    return bs*2*OD_QM_BSIZE + xydec*OD_QM_BSIZE;
+    return xydec*OD_QM_STRIDE + OD_QM_OFFSET(bs);
 }
 
 /* Initialize the quantization matrix with the magnitude compensation applied.
@@ -302,8 +302,8 @@ int od_qm_offset(int bs, int xydec)
 void od_init_qm(int16_t *x, int16_t *x_inv, const int *qm) {
   int i;
   int j;
-  int16_t y[OD_QM_BSIZE];
-  int16_t y_inv[OD_QM_BSIZE];
+  int16_t y[OD_BSIZE_MAX*OD_BSIZE_MAX];
+  int16_t y_inv[OD_BSIZE_MAX*OD_BSIZE_MAX];
   int16_t *x1;
   int16_t *x1_inv;
   int off;
@@ -331,7 +331,7 @@ void od_init_qm(int16_t *x, int16_t *x_inv, const int *qm) {
           }
           /*Convert to fit in 16 bits.*/
           y[i*(4 << bs) + j] = (int16_t)OD_MINI(OD_QM_SCALE_MAX,
-           (int16_t)floor(.5 + mag*OD_QM_SCALE));
+           (int32_t)floor(.5 + mag*OD_QM_SCALE));
           y_inv[i*(4 << bs) + j] = (int16_t)floor(.5
            + OD_QM_SCALE*OD_QM_INV_SCALE/(double)y[i*(4 << bs) + j]);
         }
