@@ -1113,9 +1113,7 @@ void od_mc_predict1fmv16_sse2(od_state *state, unsigned char *dst,
           sums = _mm_srai_epi32(sums, OD_SUBPEL_COEFF_SCALE2);
           out = _mm_packs_epi32(sums, sums);
           /*Clamp to 12 bit range.*/
-          out = _mm_min_epi16(out,
-           _mm_set1_epi16((1 << (8 + OD_COEFF_SHIFT)) - 1));
-          out = _mm_max_epi16(out, _mm_set1_epi16(0));
+          out = od_clamp_fpr_epi16(out);
           if (xblk_sz >= 4) {
             OD_ASSERT(i + 4 <= xblk_sz);
             _mm_storel_epi64((__m128i *)(((int16_t *)dst_p) + i), out);
@@ -1142,9 +1140,7 @@ void od_mc_predict1fmv16_sse2(od_state *state, unsigned char *dst,
           p = _mm_srai_epi32(p, OD_SUBPEL_COEFF_SCALE);
           p = _mm_packs_epi32(p, p);
           /*Clamp to 12 bit range.*/
-          p = _mm_min_epi16(p,
-           _mm_set1_epi16((1 << (8 + OD_COEFF_SHIFT)) - 1));
-          p = _mm_max_epi16(p, _mm_set1_epi16(0));
+          p = od_clamp_fpr_epi16(p);
           if (xblk_sz >= 4) {
             OD_ASSERT(i + 4 <= xblk_sz);
             _mm_storel_epi64((__m128i *)(((int16_t *)dst_p) + i), p);
