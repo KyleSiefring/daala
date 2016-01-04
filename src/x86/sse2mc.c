@@ -619,82 +619,44 @@ OD_SIMD_INLINE void od_mc_predict1fmv16_horizontal_nxm(int32_t *buff_p,
  const int xblk_sz, const int yblk_sz) {
   int i;
   int j;
-  if (mvxf) {
-    __m128i fx01;
-    __m128i fx23;
-    __m128i fx45;
-    od_setup_alternating_filter_variables(&fx01, &fx23, &fx45, mvxf);
-    j = -OD_SUBPEL_TOP_APRON_SZ;
-    /*The mvy is of integer position*/
-    if (!mvyf) {
-      /*Change j such that the loop is done yblk_sz times.*/
-      j = OD_SUBPEL_TOP_APRON_SZ;
-      buff_p += xblk_sz*OD_SUBPEL_TOP_APRON_SZ;
-      src_p += systride*OD_SUBPEL_TOP_APRON_SZ;
-    }
-    for (; j < yblk_sz + OD_SUBPEL_BOTTOM_APRON_SZ; j++) {
-      for (i = 0; i < xblk_sz; i += 4) {
-        __m128i src0;
-        __m128i src1;
-        __m128i sums;
-        __m128i shifted;
-        /*One extra element is needed to perform the filter on 4 elements when
-           working on 12 bit data.
-          Two overlapping vectors are loaded to deal with this.*/
-        src0 = _mm_loadu_si128(
-         (__m128i *)(((int16_t *)src_p) + i - OD_SUBPEL_TOP_APRON_SZ));
-        src1 = _mm_loadu_si128(
-         (__m128i *)(((int16_t *)src_p) + i + 1 - OD_SUBPEL_TOP_APRON_SZ));
-        sums = od_mc_multiply_reduce_add_horizontal16_4(src0, src1,
-         fx01, fx23, fx45);
-        sums = _mm_add_epi32(sums,
-         _mm_set1_epi32(128 << (OD_COEFF_SHIFT + OD_SUBPEL_COEFF_SCALE)));
-        shifted = _mm_slli_si128(sums, 1);
-        shifted = _mm_and_si128(_mm_set1_epi32(0x7F800000), shifted);
-        /*Get rid of the sign bit for 16-bit integers.*/
-        sums = _mm_and_si128(_mm_set1_epi32(0x00007FFF), sums);
-        sums = _mm_or_si128(sums, shifted);
-        /*Only store as many values as xblk_sz.*/
-        if (xblk_sz >= 4) {
-          OD_ASSERT(i + 4 <= xblk_sz);
-          _mm_storeu_si128((__m128i *)(buff_p + i), sums);
-        }
-        else {
-          OD_ASSERT(i + 2 <= xblk_sz);
-          _mm_storel_epi64((__m128i *)(buff_p + i), sums);
-        }
+  __m128i fx01;
+  __m128i fx23;
+  __m128i fx45;
+  od_setup_alternating_filter_variables(&fx01, &fx23, &fx45, mvxf);
+  for (j = -OD_SUBPEL_TOP_APRON_SZ; j < yblk_sz + OD_SUBPEL_BOTTOM_APRON_SZ; j++) {
+    for (i = 0; i < xblk_sz; i += 4) {
+      __m128i src0;
+      __m128i src1;
+      __m128i sums;
+      __m128i shifted;
+      /*One extra element is needed to perform the filter on 4 elements when
+         working on 12 bit data.
+        Two overlapping vectors are loaded to deal with this.*/
+      src0 = _mm_loadu_si128(
+       (__m128i *)(((int16_t *)src_p) + i - OD_SUBPEL_TOP_APRON_SZ));
+      src1 = _mm_loadu_si128(
+       (__m128i *)(((int16_t *)src_p) + i + 1 - OD_SUBPEL_TOP_APRON_SZ));
+      sums = od_mc_multiply_reduce_add_horizontal16_4(src0, src1,
+       fx01, fx23, fx45);
+      sums = _mm_add_epi32(sums,
+       _mm_set1_epi32(128 << (OD_COEFF_SHIFT + OD_SUBPEL_COEFF_SCALE)));
+      shifted = _mm_slli_si128(sums, 1);
+      shifted = _mm_and_si128(_mm_set1_epi32(0x7F800000), shifted);
+      /*Get rid of the sign bit for 16-bit integers.*/
+      sums = _mm_and_si128(_mm_set1_epi32(0x00007FFF), sums);
+      sums = _mm_or_si128(sums, shifted);
+      /*Only store as many values as xblk_sz.*/
+      if (xblk_sz >= 4) {
+        OD_ASSERT(i + 4 <= xblk_sz);
+        _mm_storeu_si128((__m128i *)(buff_p + i), sums);
       }
-      src_p += systride;
-      buff_p += xblk_sz;
-    }
-  }
-  /*The mvx is of integer position.*/
-  else {
-    __m128i normalize_128;
-    normalize_128 = _mm_set1_epi16(128 << OD_COEFF_SHIFT);
-    for (j = -OD_SUBPEL_TOP_APRON_SZ;
-     j < yblk_sz + OD_SUBPEL_BOTTOM_APRON_SZ; j++) {
-      for (i = 0; i < xblk_sz; i += 4) {
-        __m128i tmp;
-        __m128i src8pels;
-        tmp = _mm_loadl_epi64((__m128i *)(((int16_t *)src_p) + i));
-        tmp = _mm_sub_epi16(tmp, normalize_128);
-        /*To retain the sign, unpack in reverse order and shift right instead
-           of left.*/
-        src8pels = _mm_unpacklo_epi16(_mm_setzero_si128(), tmp);
-        src8pels = _mm_srai_epi32(src8pels, 16 - OD_SUBPEL_COEFF_SCALE);
-        /*Only store as many values as xblk_sz.*/
-        if (xblk_sz >= 4)  {
-          _mm_store_si128((__m128i *)(buff_p + i), src8pels);
-        }
-        else if (xblk_sz >= 2) {
-          OD_ASSERT(i + 2 <= xblk_sz);
-          _mm_storel_epi64((__m128i *)(buff_p + i), src8pels);
-        }
+      else {
+        OD_ASSERT(i + 2 <= xblk_sz);
+        _mm_storel_epi64((__m128i *)(buff_p + i), sums);
       }
-      src_p += systride;
-      buff_p += xblk_sz;
     }
+    src_p += systride;
+    buff_p += xblk_sz;
   }
 }
 
@@ -745,12 +707,8 @@ OD_SIMD_INLINE void od_mc_predict1fmv16_horizontal_only_nxm(unsigned char *dst_p
   __m128i fx45;
   xstride = 2;
   od_setup_alternating_filter_variables(&fx01, &fx23, &fx45, mvxf);
-  /*j = -OD_SUBPEL_TOP_APRON_SZ;*/
   /*Change j such that the loop is done yblk_sz times.*/
-  j = OD_SUBPEL_TOP_APRON_SZ;
-  /*buff_p += xblk_sz*OD_SUBPEL_TOP_APRON_SZ;
-  src_p += systride*OD_SUBPEL_TOP_APRON_SZ;*/
-  for (; j < yblk_sz + OD_SUBPEL_BOTTOM_APRON_SZ; j++) {
+  for (j = 0; j < yblk_sz; j++) {
     for (i = 0; i < xblk_sz; i += 4) {
       __m128i src0;
       __m128i src1;
@@ -764,12 +722,9 @@ OD_SIMD_INLINE void od_mc_predict1fmv16_horizontal_only_nxm(unsigned char *dst_p
        (__m128i *)(((int16_t *)src_p) + i + 1 - OD_SUBPEL_TOP_APRON_SZ));
       sums = od_mc_multiply_reduce_add_horizontal16_4(src0, src1,
        fx01, fx23, fx45);
-      /*sums = _mm_sub_epi32(sums,
-        _mm_set1_epi32(128 << (OD_COEFF_SHIFT + OD_SUBPEL_COEFF_SCALE)));*/
       /*Scale down while rounding and recenter.*/
       sums = _mm_add_epi32(sums,
-       _mm_set1_epi32((1 << OD_SUBPEL_COEFF_SCALE >> 1) /*+
-       (128 << (OD_COEFF_SHIFT + OD_SUBPEL_COEFF_SCALE))*/));
+       _mm_set1_epi32((1 << OD_SUBPEL_COEFF_SCALE >> 1)));
       sums = _mm_srai_epi32(sums, OD_SUBPEL_COEFF_SCALE);
       sums = _mm_packs_epi32(sums, sums);
       /*Clamp to 12 bit range.*/
@@ -789,38 +744,20 @@ OD_SIMD_INLINE void od_mc_predict1fmv16_horizontal_only_nxm(unsigned char *dst_p
   }
 }
 
-void od_mc_predict1fmv16_horizontal_only_2x2(unsigned char *dst_p,
- const unsigned char *src_p, int systride, int mvxf) {
-  od_mc_predict1fmv16_horizontal_only_nxm(dst_p, src_p, systride, mvxf, 2, 2);
-}
+#define OD_MC_PREDICT1FMV16_HORIZONTAL_ONLY_SSE2(_xblk_sz, _yblk_sz) \
+static void od_mc_predict1fmv16_horizontal_only_##_xblk_sz##x##_yblk_sz##_sse2(\
+ unsigned char *_dst_p, const unsigned char *_src_p, int _systride, \
+ int _mvxf) { \
+  od_mc_predict1fmv16_horizontal_only_nxm(_dst_p, _src_p, _systride, _mvxf, \
+  _xblk_sz, _yblk_sz); \
+} \
 
-void od_mc_predict1fmv16_horizontal_only_4x4(unsigned char *dst_p,
- const unsigned char *src_p, int systride, int mvxf) {
-  od_mc_predict1fmv16_horizontal_only_nxm(dst_p, src_p, systride, mvxf, 4, 4);
-}
-
-void od_mc_predict1fmv16_horizontal_only_8x8(unsigned char *dst_p,
- const unsigned char *src_p, int systride, int mvxf) {
-  od_mc_predict1fmv16_horizontal_only_nxm(dst_p, src_p, systride, mvxf, 8, 8);
-}
-
-void od_mc_predict1fmv16_horizontal_only_16x16(unsigned char *dst_p,
- const unsigned char *src_p, int systride, int mvxf) {
-  od_mc_predict1fmv16_horizontal_only_nxm(dst_p, src_p, systride, mvxf,
-   16, 16);
-}
-
-void od_mc_predict1fmv16_horizontal_only_32x32(unsigned char *dst_p,
- const unsigned char *src_p, int systride, int mvxf) {
-  od_mc_predict1fmv16_horizontal_only_nxm(dst_p, src_p, systride, mvxf,
-   32, 32);
-}
-
-void od_mc_predict1fmv16_horizontal_only_64x64(unsigned char *dst_p,
- const unsigned char *src_p, int systride, int mvxf) {
-  od_mc_predict1fmv16_horizontal_only_nxm(dst_p, src_p, systride, mvxf,
-   64, 64);
-}
+OD_MC_PREDICT1FMV16_HORIZONTAL_ONLY_SSE2(2, 2)
+OD_MC_PREDICT1FMV16_HORIZONTAL_ONLY_SSE2(4, 4)
+OD_MC_PREDICT1FMV16_HORIZONTAL_ONLY_SSE2(8, 8)
+OD_MC_PREDICT1FMV16_HORIZONTAL_ONLY_SSE2(16, 16)
+OD_MC_PREDICT1FMV16_HORIZONTAL_ONLY_SSE2(32, 32)
+OD_MC_PREDICT1FMV16_HORIZONTAL_ONLY_SSE2(64, 64)
 
 typedef void (*od_mc_predict1fmv16_horizontal_only_fixed_func)(
  unsigned char *dst_p, const unsigned char *src_p, int systride, int mvxf);
@@ -922,35 +859,20 @@ OD_SIMD_INLINE void od_mc_predict1fmv16_vertical_only_nxm(unsigned char *dst_p,
   }
 }
 
-void od_mc_predict1fmv16_vertical_only_2x2(unsigned char *dst_p,
- const unsigned char *src_p, int systride, int mvyf) {
-  od_mc_predict1fmv16_vertical_only_nxm(dst_p, src_p, systride, mvyf, 2, 2);
-}
+#define OD_MC_PREDICT1FMV16_VERTICAL_ONLY_SSE2(_xblk_sz, _yblk_sz) \
+static void od_mc_predict1fmv16_vertical_only_##_xblk_sz##x##_yblk_sz##_sse2( \
+ unsigned char *_dst_p, const unsigned char *_src_p, int _systride, \
+ int _mvyf) { \
+  od_mc_predict1fmv16_vertical_only_nxm(_dst_p, _src_p, _systride, _mvyf, \
+  _xblk_sz, _yblk_sz); \
+} \
 
-void od_mc_predict1fmv16_vertical_only_4x4(unsigned char *dst_p,
- const unsigned char *src_p, int systride, int mvyf) {
-  od_mc_predict1fmv16_vertical_only_nxm(dst_p, src_p, systride, mvyf, 4, 4);
-}
-
-void od_mc_predict1fmv16_vertical_only_8x8(unsigned char *dst_p,
- const unsigned char *src_p, int systride, int mvyf) {
-  od_mc_predict1fmv16_vertical_only_nxm(dst_p, src_p, systride, mvyf, 8, 8);
-}
-
-void od_mc_predict1fmv16_vertical_only_16x16(unsigned char *dst_p,
- const unsigned char *src_p, int systride, int mvyf) {
-  od_mc_predict1fmv16_vertical_only_nxm(dst_p, src_p, systride, mvyf, 16, 16);
-}
-
-void od_mc_predict1fmv16_vertical_only_32x32(unsigned char *dst_p,
- const unsigned char *src_p, int systride, int mvyf) {
-  od_mc_predict1fmv16_vertical_only_nxm(dst_p, src_p, systride, mvyf, 32, 32);
-}
-
-void od_mc_predict1fmv16_vertical_only_64x64(unsigned char *dst_p,
- const unsigned char *src_p, int systride, int mvyf) {
-  od_mc_predict1fmv16_vertical_only_nxm(dst_p, src_p, systride, mvyf, 64, 64);
-}
+OD_MC_PREDICT1FMV16_VERTICAL_ONLY_SSE2(2, 2)
+OD_MC_PREDICT1FMV16_VERTICAL_ONLY_SSE2(4, 4)
+OD_MC_PREDICT1FMV16_VERTICAL_ONLY_SSE2(8, 8)
+OD_MC_PREDICT1FMV16_VERTICAL_ONLY_SSE2(16, 16)
+OD_MC_PREDICT1FMV16_VERTICAL_ONLY_SSE2(32, 32)
+OD_MC_PREDICT1FMV16_VERTICAL_ONLY_SSE2(64, 64)
 
 typedef void (*od_mc_predict1fmv16_vertical_only_fixed_func)(
  unsigned char *dst_p, const unsigned char *src_p, int systride, int mvyf);
@@ -966,21 +888,21 @@ void od_mc_predict1fmv16_sse2(od_state *state, unsigned char *dst,
   };
   static const od_mc_predict1fmv16_vertical_only_fixed_func
    VTBL_VERTICAL_ONLY[OD_LOG_MVBSIZE_MAX] = {
-    od_mc_predict1fmv16_vertical_only_2x2,
-    od_mc_predict1fmv16_vertical_only_4x4,
-    od_mc_predict1fmv16_vertical_only_8x8,
-    od_mc_predict1fmv16_vertical_only_16x16,
-    od_mc_predict1fmv16_vertical_only_32x32,
-    od_mc_predict1fmv16_vertical_only_64x64
+    od_mc_predict1fmv16_vertical_only_2x2_sse2,
+    od_mc_predict1fmv16_vertical_only_4x4_sse2,
+    od_mc_predict1fmv16_vertical_only_8x8_sse2,
+    od_mc_predict1fmv16_vertical_only_16x16_sse2,
+    od_mc_predict1fmv16_vertical_only_32x32_sse2,
+    od_mc_predict1fmv16_vertical_only_64x64_sse2
   };
   static const od_mc_predict1fmv16_horizontal_only_fixed_func
    VTBL_HORIZONTAL_ONLY[OD_LOG_MVBSIZE_MAX] = {
-    od_mc_predict1fmv16_horizontal_only_2x2,
-    od_mc_predict1fmv16_horizontal_only_4x4,
-    od_mc_predict1fmv16_horizontal_only_8x8,
-    od_mc_predict1fmv16_horizontal_only_16x16,
-    od_mc_predict1fmv16_horizontal_only_32x32,
-    od_mc_predict1fmv16_horizontal_only_64x64
+    od_mc_predict1fmv16_horizontal_only_2x2_sse2,
+    od_mc_predict1fmv16_horizontal_only_4x4_sse2,
+    od_mc_predict1fmv16_horizontal_only_8x8_sse2,
+    od_mc_predict1fmv16_horizontal_only_16x16_sse2,
+    od_mc_predict1fmv16_horizontal_only_32x32_sse2,
+    od_mc_predict1fmv16_horizontal_only_64x64_sse2
   };
   int mvxf;
   int mvyf;
@@ -1035,7 +957,7 @@ void od_mc_predict1fmv16_sse2(od_state *state, unsigned char *dst,
     (*VTBL_HORIZONTAL[log_xblk_sz - 1])(buff_p, src_p, systride, mvxf, mvyf);
     /*2nd stage 1D filtering, Vertical.*/
     buff_p = buff + xblk_sz*OD_SUBPEL_TOP_APRON_SZ;
-    if (mvyf) {
+    {
       __m128i fy0;
       __m128i fy1;
       __m128i fy2;
@@ -1115,33 +1037,6 @@ void od_mc_predict1fmv16_sse2(od_state *state, unsigned char *dst,
           else {
             OD_ASSERT(i + 2 <= xblk_sz);
             *((uint32_t *)(((int16_t *)dst_p) + i)) = _mm_cvtsi128_si32(out);
-          }
-        }
-        buff_p += xblk_sz;
-        dst_p += xblk_sz*xstride;
-      }
-    }
-    /*The mvy is in integer position.*/
-    else {
-      for (j = 0; j < yblk_sz; j++) {
-        for (i = 0; i < xblk_sz; i += 4) {
-          __m128i p;
-          p = _mm_loadu_si128((__m128i *)(buff_p + i));
-          /*Scale down while rounding and recenter.*/
-          p = _mm_add_epi32(p,
-           _mm_set1_epi32((1 << OD_SUBPEL_COEFF_SCALE >> 1) +
-           (128 << (OD_COEFF_SHIFT + OD_SUBPEL_COEFF_SCALE))));
-          p = _mm_srai_epi32(p, OD_SUBPEL_COEFF_SCALE);
-          p = _mm_packs_epi32(p, p);
-          /*Clamp to 12 bit range.*/
-          p = od_clamp_fpr_epi16(p);
-          if (xblk_sz >= 4) {
-            OD_ASSERT(i + 4 <= xblk_sz);
-            _mm_storel_epi64((__m128i *)(((int16_t *)dst_p) + i), p);
-          }
-          else {
-            OD_ASSERT(i + 2 <= xblk_sz);
-            *((uint32_t *)(((int16_t *)dst_p) + i)) = _mm_cvtsi128_si32(p);
           }
         }
         buff_p += xblk_sz;
