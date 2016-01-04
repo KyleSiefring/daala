@@ -637,6 +637,7 @@ OD_SIMD_INLINE void od_mc_predict1fmv16_horizontal_nxm(int32_t *buff_p,
         __m128i src0;
         __m128i src1;
         __m128i sums;
+        __m128i shifted;
         /*One extra element is needed to perform the filter on 4 elements when
            working on 12 bit data.
           Two overlapping vectors are loaded to deal with this.*/
@@ -646,8 +647,13 @@ OD_SIMD_INLINE void od_mc_predict1fmv16_horizontal_nxm(int32_t *buff_p,
          (__m128i *)(((int16_t *)src_p) + i + 1 - OD_SUBPEL_TOP_APRON_SZ));
         sums = od_mc_multiply_reduce_add_horizontal16_4(src0, src1,
          fx01, fx23, fx45);
-        sums = _mm_sub_epi32(sums,
-          _mm_set1_epi32(128 << (OD_COEFF_SHIFT + OD_SUBPEL_COEFF_SCALE)));
+        sums = _mm_add_epi32(sums,
+         _mm_set1_epi32(128 << (OD_COEFF_SHIFT + OD_SUBPEL_COEFF_SCALE)));
+        shifted = _mm_slli_si128(sums, 1);
+        shifted = _mm_and_si128(_mm_set1_epi32(0x7F800000), shifted);
+        /*Get rid of the sign bit for 16-bit integers.*/
+        sums = _mm_and_si128(_mm_set1_epi32(0x00007FFF), sums);
+        sums = _mm_or_si128(sums, shifted);
         /*Only store as many values as xblk_sz.*/
         if (xblk_sz >= 4) {
           OD_ASSERT(i + 4 <= xblk_sz);
@@ -1036,12 +1042,17 @@ void od_mc_predict1fmv16_sse2(od_state *state, unsigned char *dst,
       __m128i fy3;
       __m128i fy4;
       __m128i fy5;
-      fy0 = _mm_set1_epi32(fy[0]);
-      fy1 = _mm_set1_epi32(fy[1]);
-      fy2 = _mm_set1_epi32(fy[2]);
-      fy3 = _mm_set1_epi32(fy[3]);
-      fy4 = _mm_set1_epi32(fy[4]);
-      fy5 = _mm_set1_epi32(fy[5]);
+      __m128i rounding_offset;
+      fy0 = _mm_set1_epi32(fy[0]*(1 << 24) + (0xFFFF & fy[0]));
+      fy1 = _mm_set1_epi32(fy[1]*(1 << 24) + (0xFFFF & fy[1]));
+      fy2 = _mm_set1_epi32(fy[2]*(1 << 24) + (0xFFFF & fy[2]));
+      fy3 = _mm_set1_epi32(fy[3]*(1 << 24) + (0xFFFF & fy[3]));
+      fy4 = _mm_set1_epi32(fy[4]*(1 << 24) + (0xFFFF & fy[4]));
+      fy5 = _mm_set1_epi32(fy[5]*(1 << 24) + (0xFFFF & fy[5]));
+      rounding_offset = _mm_set1_epi32((1 << OD_SUBPEL_COEFF_SCALE2 >> 1) +
+       (128 << (OD_COEFF_SHIFT + OD_SUBPEL_COEFF_SCALE2)) -
+       (fy[0] + fy[1] + fy[2] + fy[3] + fy[4] + fy[5]) *
+       (128 << (OD_COEFF_SHIFT + OD_SUBPEL_COEFF_SCALE + 1)));
       for (j = 0; j < yblk_sz; j++) {
         for (i = 0; i < xblk_sz; i += 4) {
           __m128i row0;
@@ -1050,8 +1061,9 @@ void od_mc_predict1fmv16_sse2(od_state *state, unsigned char *dst,
           __m128i row3;
           __m128i row4;
           __m128i row5;
-          __m128i sums_even;
-          __m128i sums_odd;
+          __m128i sums01;
+          __m128i sums23;
+          __m128i sums45;
           __m128i sums;
           __m128i out;
           OD_ASSERT((buff_p + i + ((0 - OD_SUBPEL_TOP_APRON_SZ)*xblk_sz) + 15)
@@ -1079,37 +1091,19 @@ void od_mc_predict1fmv16_sse2(od_state *state, unsigned char *dst,
            (buff_p + i + (4 - OD_SUBPEL_TOP_APRON_SZ)*(1 << log_xblk_sz)));
           row5 = _mm_loadu_si128((__m128i *)
            (buff_p + i + (5 - OD_SUBPEL_TOP_APRON_SZ)*(1 << log_xblk_sz)));
-          /*Multiply each row with the cooresponding filter value and add
-             the products together.
-            Products and product sums are split into even and odd groups due
-             the use of _mm_mul_epu32.*/
-          sums_even = _mm_mul_epu32(row0, fy0);
-          sums_odd = _mm_mul_epu32(_mm_srli_si128(row0, 4), fy0);
-          sums_even = _mm_add_epi32(sums_even, _mm_mul_epu32(row1, fy1));
-          sums_odd = _mm_add_epi32(sums_odd,
-           _mm_mul_epu32(_mm_srli_si128(row1, 4), fy1));
-          sums_even = _mm_add_epi32(sums_even, _mm_mul_epu32(row2, fy2));
-          sums_odd = _mm_add_epi32(sums_odd,
-           _mm_mul_epu32(_mm_srli_si128(row2, 4), fy2));
-          sums_even = _mm_add_epi32(sums_even, _mm_mul_epu32(row3, fy3));
-          sums_odd = _mm_add_epi32(sums_odd,
-           _mm_mul_epu32(_mm_srli_si128(row3, 4), fy3));
-          sums_even = _mm_add_epi32(sums_even, _mm_mul_epu32(row4, fy4));
-          sums_odd = _mm_add_epi32(sums_odd,
-           _mm_mul_epu32(_mm_srli_si128(row4, 4), fy4));
-          sums_even = _mm_add_epi32(sums_even, _mm_mul_epu32(row5, fy5));
-          sums_odd = _mm_add_epi32(sums_odd,
-           _mm_mul_epu32(_mm_srli_si128(row5, 4), fy5));
-          /*Combine the even and odd product sums.
-            Found in this thread:
-             software.intel.com/en-us/forums/intel-c-compiler/topic/288768*/
-          sums = _mm_unpacklo_epi32(
-           _mm_shuffle_epi32(sums_even, _MM_SHUFFLE(0, 0, 2, 0)),
-           _mm_shuffle_epi32(sums_odd, _MM_SHUFFLE(0, 0, 2, 0)));
+          row0 = _mm_madd_epi16(row0, fy0);
+          row1 = _mm_madd_epi16(row1, fy1);
+          row2 = _mm_madd_epi16(row2, fy2);
+          row3 = _mm_madd_epi16(row3, fy3);
+          row4 = _mm_madd_epi16(row4, fy4);
+          row5 = _mm_madd_epi16(row5, fy5);
+          sums01 = _mm_add_epi32(row0, row1);
+          sums23 = _mm_add_epi32(row2, row3);
+          sums45 = _mm_add_epi32(row4, row5);
+          sums = _mm_add_epi32(sums01, sums23);
+          sums = _mm_add_epi32(sums, sums45);
           /*Scale down while rounding and recenter.*/
-          sums = _mm_add_epi32(sums,
-           _mm_set1_epi32((1 << OD_SUBPEL_COEFF_SCALE2 >> 1) +
-           (128 << (OD_COEFF_SHIFT + OD_SUBPEL_COEFF_SCALE2))));
+          sums = _mm_add_epi32(sums, rounding_offset);
           sums = _mm_srai_epi32(sums, OD_SUBPEL_COEFF_SCALE2);
           out = _mm_packs_epi32(sums, sums);
           /*Clamp to 12 bit range.*/
