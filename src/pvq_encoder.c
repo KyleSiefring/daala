@@ -228,14 +228,14 @@ static double pvq_search_rdo_double(const od_val16 *xcoeff, int n, int k,
   __m256d accel_rate_vec = _mm256_set1_pd(accel_rate*special_lambda);
   for (; i < k; i++) {
     int pos;
-    double best_cost;
+    __m128d best_cost;
     __m256d best_positions;
     __m256d best_costs;
     __m256d indexes;
     __m256d xy_vec;
     __m256 yy_vec;
     pos = 0;
-    best_cost = -1e5;
+    best_cost = _mm_set_sd(-1e5);
     best_positions = _mm256_set_pd(3, 2, 1, 0);
     best_costs = _mm256_set1_pd(-1e5);
     indexes = best_positions;
@@ -279,6 +279,16 @@ static double pvq_search_rdo_double(const od_val16 *xcoeff, int n, int k,
       best_costs = _mm256_blendv_pd(best_costs, tmp_xy1, blend_mask);
       best_positions = _mm256_blendv_pd(best_positions, indexes, blend_mask);
       indexes = _mm256_add_pd(indexes, _mm256_set1_pd(4));
+      /*
+      tmp_xy = _mm256_add_ps(tmp_xy, xy_vec);
+      tmp_xy = _mm256_mul_ps(tmp_xy, tmp_yy);
+      quads = _mm256_fmadd_ps(indexes, accel_rate_vec, delta_rate_vec);
+      tmp_xy = _mm256_fnmadd_ps(indexes, quads, tmp_xy0);
+      blend_mask = _mm256_cmp_ps(tmp_xy, best_costs, _CMP_GT_OS);
+      best_costs = _mm256_blendv_ps(best_costs, tmp_xy, blend_mask);
+      best_positions = _mm256_blendv_ps(best_positions, indexes, blend_mask);
+      indexes = _mm256_add_ps(indexes, _mm256_set1_ps(8));
+      */
     }
     if (j != 0) {
       __m128d lower_costs;
@@ -295,15 +305,39 @@ static double pvq_search_rdo_double(const od_val16 *xcoeff, int n, int k,
       lower_positions = _mm_blendv_pd(lower_positions, upper_positions, blend_mask);
       upper_costs = _mm_shuffle_pd(lower_costs, lower_costs, 3);
       upper_positions = _mm_shuffle_pd(lower_positions, lower_positions, 3);
+      /* Do I even need these 2 instructions. */
       lower_costs = _mm_shuffle_pd(lower_costs, lower_costs, 0);
       lower_positions = _mm_shuffle_pd(lower_positions, lower_positions, 0);
+      /* Use ucomigt instead??? */
       blend_mask = _mm_cmp_sd(upper_costs, lower_costs, _CMP_GT_OS);
-      lower_costs = _mm_blendv_pd(lower_costs, upper_costs, blend_mask);
+      best_cost = _mm_blendv_pd(lower_costs, upper_costs, blend_mask);
+      /*lower_costs = _mm_blendv_pd(lower_costs, upper_costs, blend_mask);*/
       lower_positions = _mm_blendv_pd(lower_positions, upper_positions, blend_mask);
-      best_cost = _mm_cvtsd_f64(lower_costs);
+      /*best_cost = _mm_cvtsd_f64(lower_costs);*/
       pos = _mm_cvtsd_si32(lower_positions);
     }
     for (; j < n; j++) {
+#if 1
+      __m128d index;
+      __m128d tmp_xy;
+      __m128 tmp_yy;
+      __m128d tmp_yy_sd;
+      __m128d quad;
+      index = _mm_set_sd(j);
+      tmp_yy = _mm_set_ss(2*ypulse[j]);
+      tmp_yy = _mm_add_ss(tmp_yy, _mm256_castps256_ps128(yy_vec));
+      tmp_yy = _mm_rsqrt_ss(tmp_yy);
+      tmp_yy_sd = _mm_cvtss_sd(_mm_setzero_pd(), tmp_yy);
+      tmp_xy = _mm_load_sd(x + j);
+      tmp_xy = _mm_add_sd(tmp_xy, _mm256_castpd256_pd128(xy_vec));
+      tmp_xy = _mm_mul_sd(tmp_xy, tmp_yy_sd);
+      quad = _mm_fmadd_sd(index, _mm256_castpd256_pd128(accel_rate_vec), _mm256_castpd256_pd128(delta_rate_vec));
+      tmp_xy = _mm_fnmadd_sd(index, quad, tmp_xy);
+      if (_mm_ucomigt_sd(tmp_xy, best_cost)) {
+        best_cost = tmp_xy;
+        pos = j;
+      }
+#else
       double tmp_xy;
       double tmp_yy;
       tmp_xy = xy + x[j];
@@ -313,6 +347,7 @@ static double pvq_search_rdo_double(const od_val16 *xcoeff, int n, int k,
         best_cost = tmp_xy;
         pos = j;
       }
+#endif
     }
     xy = xy + x[pos];
     yy = yy + 2*ypulse[pos] + 1;
