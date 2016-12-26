@@ -140,6 +140,7 @@ src_libdaalaenc_la_SOURCES += \
 %sse2mcenc.o %sse2mcenc.lo: CFLAGS += -msse2
 endif
 endif
+%pvq_encoder.o %pvq_encoder.lo: CFLAGS += -mavx2 -mfma
 
 # Example programs
 
