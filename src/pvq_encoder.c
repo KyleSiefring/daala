@@ -285,7 +285,11 @@ static double pvq_search_rdo_double(const od_val16 *xcoeff, int n, int k,
       ypulse_vec = _mm256_slli_epi32(ypulse_vec, 1);
       tmp_yy = _mm256_cvtepi32_ps(ypulse_vec);
       tmp_yy = _mm256_add_ps(yy_vec, tmp_yy);
+      __m256 input = tmp_yy;
       tmp_yy = _mm256_rsqrt_ps(tmp_yy);
+      __m256 almostOne = _mm256_mul_ps(input, _mm256_mul_ps(tmp_yy, tmp_yy));
+      tmp_yy = _mm256_mul_ps(_mm256_set1_ps(.5), tmp_yy);
+      tmp_yy = _mm256_mul_ps(tmp_yy, _mm256_sub_ps(_mm256_set1_ps(3), almostOne));
 #ifdef DOUBLE_PERCISION
       tmp_yy_pd0 = _mm256_cvtps_pd(_mm256_castps256_ps128(tmp_yy));
       tmp_yy_pd1 = _mm256_cvtps_pd(_mm256_extractf128_ps(tmp_yy, 1));
