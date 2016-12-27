@@ -145,7 +145,7 @@ static double pvq_search_rdo_double(const od_val16 *xcoeff, int n, int k,
   /* Only use RDO on the last few pulses. This not only saves CPU, but using
      RDO on all pulses actually makes the results worse for reasons I don't
      fully understand. */
-  rdo_pulses = k; /* 1 + k/4; */
+  rdo_pulses = 1 + k/4;
   /* Rough assumption for now, the last position costs about 3 bits more than
      the first. */
   delta_rate = 3./n;
@@ -222,39 +222,71 @@ static double pvq_search_rdo_double(const od_val16 *xcoeff, int n, int k,
     ypulse[pos]++;
   }
 #else
+/*
+#define DOUBLE_PERCISION
+*/
   double special_lambda = lambda/(2*norm_1);
   /* __m256d lambda_vec = _mm256_set1_pd(special_lambda); */
+#ifdef DOUBLE_PERCISION
   __m256d delta_rate_vec = _mm256_set1_pd(delta_rate*special_lambda);
   __m256d accel_rate_vec = _mm256_set1_pd(accel_rate*special_lambda);
+#else
+  __m256 delta_rate_vec = _mm256_set1_ps(delta_rate*special_lambda);
+  __m256 accel_rate_vec = _mm256_set1_ps(accel_rate*special_lambda);
+#endif
   for (; i < k; i++) {
     int pos;
+#ifdef DOUBLE_PERCISION
     __m128d best_cost;
     __m256d best_positions;
     __m256d best_costs;
     __m256d indexes;
     __m256d xy_vec;
+#else
+    __m128 best_cost;
+    __m256 best_positions;
+    __m256 best_costs;
+    __m256 indexes;
+    __m256 xy_vec;
+#endif
     __m256 yy_vec;
     pos = 0;
+#ifdef DOUBLE_PERCISION
     best_cost = _mm_set_sd(-1e5);
     best_positions = _mm256_set_pd(3, 2, 1, 0);
     best_costs = _mm256_set1_pd(-1e5);
-    indexes = best_positions;
     xy_vec = _mm256_set1_pd(xy);
+#else
+    best_cost = _mm_set_ss(-1e5);
+    best_positions = _mm256_set_ps(7, 6, 5, 4, 3, 2, 1, 0);
+    best_costs = _mm256_set1_ps(-1e5);
+    xy_vec = _mm256_set1_ps(xy);
+#endif
+    indexes = best_positions;
     yy_vec = _mm256_set1_ps(yy + 1);
     for (j = 0; j <= n - 8; j += 8) {
       __m256i ypulse_vec;
       __m256 tmp_yy;
+#ifdef DOUBLE_PERCISION
       __m256d tmp_yy_pd0;
       __m256d tmp_yy_pd1;
       __m256d tmp_xy0;
       __m256d tmp_xy1;
       __m256d quads;
       __m256d blend_mask;
+#else
+      __m256d tmp_xy_pd0;
+      __m256d tmp_xy_pd1;
+      __m256 tmp_xy;
+      __m256 quads;
+      __m256 blend_mask;
+#endif
       ypulse_vec = _mm256_loadu_si256((__m256i *)(ypulse + j));
       ypulse_vec = _mm256_slli_epi32(ypulse_vec, 1);
       tmp_yy = _mm256_cvtepi32_ps(ypulse_vec);
       tmp_yy = _mm256_add_ps(yy_vec, tmp_yy);
       tmp_yy = _mm256_rsqrt_ps(tmp_yy);
+#ifdef DOUBLE_PERCISION
       tmp_yy_pd0 = _mm256_cvtps_pd(_mm256_castps256_ps128(tmp_yy));
       tmp_yy_pd1 = _mm256_cvtps_pd(_mm256_extractf128_ps(tmp_yy, 1));
       /*tmp_yy_pd0 = _mm256_sqrt_pd(tmp_yy_pd0);
@@ -279,18 +311,23 @@ static double pvq_search_rdo_double(const od_val16 *xcoeff, int n, int k,
       best_costs = _mm256_blendv_pd(best_costs, tmp_xy1, blend_mask);
       best_positions = _mm256_blendv_pd(best_positions, indexes, blend_mask);
       indexes = _mm256_add_pd(indexes, _mm256_set1_pd(4));
-      /*
+#else
+      tmp_xy_pd0 = _mm256_load_pd(x + j);
+      tmp_xy_pd1 = _mm256_load_pd(x + j + 4);
+      tmp_xy = _mm256_castps128_ps256(_mm256_cvtpd_ps(tmp_xy_pd0));
+      tmp_xy = _mm256_insertf128_ps(tmp_xy, _mm256_cvtpd_ps(tmp_xy_pd1), 1);
       tmp_xy = _mm256_add_ps(tmp_xy, xy_vec);
       tmp_xy = _mm256_mul_ps(tmp_xy, tmp_yy);
       quads = _mm256_fmadd_ps(indexes, accel_rate_vec, delta_rate_vec);
-      tmp_xy = _mm256_fnmadd_ps(indexes, quads, tmp_xy0);
+      tmp_xy = _mm256_fnmadd_ps(indexes, quads, tmp_xy);
       blend_mask = _mm256_cmp_ps(tmp_xy, best_costs, _CMP_GT_OS);
       best_costs = _mm256_blendv_ps(best_costs, tmp_xy, blend_mask);
       best_positions = _mm256_blendv_ps(best_positions, indexes, blend_mask);
       indexes = _mm256_add_ps(indexes, _mm256_set1_ps(8));
-      */
+#endif
     }
     if (j != 0) {
+#ifdef DOUBLE_PERCISION
       __m128d lower_costs;
       __m128d lower_positions;
       __m128d upper_costs;
@@ -305,9 +342,6 @@ static double pvq_search_rdo_double(const od_val16 *xcoeff, int n, int k,
       lower_positions = _mm_blendv_pd(lower_positions, upper_positions, blend_mask);
       upper_costs = _mm_shuffle_pd(lower_costs, lower_costs, 3);
       upper_positions = _mm_shuffle_pd(lower_positions, lower_positions, 3);
-      /* Do I even need these 2 instructions. */
-      lower_costs = _mm_shuffle_pd(lower_costs, lower_costs, 0);
-      lower_positions = _mm_shuffle_pd(lower_positions, lower_positions, 0);
       /* Use ucomigt instead??? */
       blend_mask = _mm_cmp_sd(upper_costs, lower_costs, _CMP_GT_OS);
       best_cost = _mm_blendv_pd(lower_costs, upper_costs, blend_mask);
@@ -315,9 +349,34 @@ static double pvq_search_rdo_double(const od_val16 *xcoeff, int n, int k,
       lower_positions = _mm_blendv_pd(lower_positions, upper_positions, blend_mask);
       /*best_cost = _mm_cvtsd_f64(lower_costs);*/
       pos = _mm_cvtsd_si32(lower_positions);
+#else
+      __m128 lower_costs;
+      __m128 lower_positions;
+      __m128 upper_costs;
+      __m128 upper_positions;
+      __m128 blend_mask;
+      lower_costs = _mm256_castps256_ps128(best_costs);
+      lower_positions = _mm256_castps256_ps128(best_positions);
+      upper_costs = _mm256_extractf128_ps(best_costs, 1);
+      upper_positions = _mm256_extractf128_ps(best_positions, 1);
+      blend_mask = _mm_cmp_ps(upper_costs, lower_costs, _CMP_GT_OS);
+      lower_costs = _mm_blendv_ps(lower_costs, upper_costs, blend_mask);
+      lower_positions = _mm_blendv_ps(lower_positions, upper_positions, blend_mask);
+      upper_costs = _mm_shuffle_ps(lower_costs, lower_costs, _MM_SHUFFLE(0, 1, 2, 3));
+      upper_positions = _mm_shuffle_ps(lower_positions, lower_positions, _MM_SHUFFLE(0, 1, 2, 3));
+      blend_mask = _mm_cmp_ps(upper_costs, lower_costs, _CMP_GT_OS);
+      lower_costs = _mm_blendv_ps(lower_costs, upper_costs, blend_mask);
+      lower_positions = _mm_blendv_ps(lower_positions, upper_positions, blend_mask);
+      upper_costs = _mm_shuffle_ps(lower_costs, lower_costs, _MM_SHUFFLE(0, 1, 0, 1));
+      upper_positions = _mm_shuffle_ps(lower_positions, lower_positions, _MM_SHUFFLE(0, 1, 0, 1));
+      blend_mask = _mm_cmp_ss(upper_costs, lower_costs, _CMP_GT_OS);
+      best_cost = _mm_blendv_ps(lower_costs, upper_costs, blend_mask);
+      lower_positions = _mm_blendv_ps(lower_positions, upper_positions, blend_mask);
+      pos = _mm_cvtss_si32(lower_positions);
+#endif
     }
     for (; j < n; j++) {
-#if 1
+#ifdef DOUBLE_PERCISION
       __m128d index;
       __m128d tmp_xy;
       __m128 tmp_yy;
@@ -338,12 +397,22 @@ static double pvq_search_rdo_double(const od_val16 *xcoeff, int n, int k,
         pos = j;
       }
 #else
-      double tmp_xy;
-      double tmp_yy;
-      tmp_xy = xy + x[j];
-      tmp_yy = od_rsqrt_table(yy + 2*ypulse[j] + 1);
-      tmp_xy = tmp_xy*tmp_yy - special_lambda*j*(delta_rate + j*accel_rate);
-      if (tmp_xy > best_cost) {
+      __m128 index;
+      __m128d tmp_xy_sd;
+      __m128 tmp_xy;
+      __m128 tmp_yy;
+      __m128 quad;
+      index = _mm_set_ss(j);
+      tmp_yy = _mm_set_ss(2*ypulse[j]);
+      tmp_yy = _mm_add_ss(tmp_yy, _mm256_castps256_ps128(yy_vec));
+      tmp_yy = _mm_rsqrt_ss(tmp_yy);
+      tmp_xy_sd = _mm_load_sd(x + j);
+      tmp_xy = _mm_cvtsd_ss(_mm_setzero_ps(), tmp_xy_sd);
+      tmp_xy = _mm_add_ss(tmp_xy, _mm256_castps256_ps128(xy_vec));
+      tmp_xy = _mm_mul_ss(tmp_xy, tmp_yy);
+      quad = _mm_fmadd_ss(index, _mm256_castps256_ps128(accel_rate_vec), _mm256_castps256_ps128(delta_rate_vec));
+      tmp_xy = _mm_fnmadd_ss(index, quad, tmp_xy);
+      if (_mm_ucomigt_ss(tmp_xy, best_cost)) {
         best_cost = tmp_xy;
         pos = j;
       }
