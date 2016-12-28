@@ -222,9 +222,9 @@ static double pvq_search_rdo_double(const od_val16 *xcoeff, int n, int k,
     ypulse[pos]++;
   }
 #else
-/*
+#if 1
 #define DOUBLE_PERCISION
-*/
+#endif
   double special_lambda = lambda/(2*norm_1);
   /* __m256d lambda_vec = _mm256_set1_pd(special_lambda); */
 #ifdef DOUBLE_PERCISION
@@ -242,67 +242,55 @@ static double pvq_search_rdo_double(const od_val16 *xcoeff, int n, int k,
     __m256d best_costs;
     __m256d indexes;
     __m256d xy_vec;
+    __m256d yy_vec;
 #else
     __m128 best_cost;
     __m256 best_positions;
     __m256 best_costs;
     __m256 indexes;
     __m256 xy_vec;
-#endif
     __m256 yy_vec;
+#endif
     pos = 0;
 #ifdef DOUBLE_PERCISION
     best_cost = _mm_set_sd(-1e5);
     best_positions = _mm256_set_pd(3, 2, 1, 0);
     best_costs = _mm256_set1_pd(-1e5);
     xy_vec = _mm256_set1_pd(xy);
+    yy_vec = _mm256_set1_pd(yy + 1);
 #else
     best_cost = _mm_set_ss(-1e5);
     best_positions = _mm256_set_ps(7, 6, 5, 4, 3, 2, 1, 0);
     best_costs = _mm256_set1_ps(-1e5);
     xy_vec = _mm256_set1_ps(xy);
+    yy_vec = _mm256_set1_ps(yy + 1);
 #endif
     indexes = best_positions;
-    yy_vec = _mm256_set1_ps(yy + 1);
-    for (j = 0; j <= n - 8; j += 8) {
+    j = 0;
+#if 1
+    for (; j <= n - 8; j += 8) {
       __m256i ypulse_vec;
-      __m256 tmp_yy;
 #ifdef DOUBLE_PERCISION
-      __m256d tmp_yy_pd0;
-      __m256d tmp_yy_pd1;
+      __m256d tmp_yy0;
+      __m256d tmp_yy1;
       __m256d tmp_xy0;
       __m256d tmp_xy1;
       __m256d quads;
       __m256d blend_mask;
-#else
-      __m256d tmp_xy_pd0;
-      __m256d tmp_xy_pd1;
-      __m256 tmp_xy;
-      __m256 quads;
-      __m256 blend_mask;
-#endif
       ypulse_vec = _mm256_loadu_si256((__m256i *)(ypulse + j));
       ypulse_vec = _mm256_slli_epi32(ypulse_vec, 1);
-      tmp_yy = _mm256_cvtepi32_ps(ypulse_vec);
-      tmp_yy = _mm256_add_ps(yy_vec, tmp_yy);
-      __m256 input = tmp_yy;
-      tmp_yy = _mm256_rsqrt_ps(tmp_yy);
-      __m256 almostOne = _mm256_mul_ps(input, _mm256_mul_ps(tmp_yy, tmp_yy));
-      tmp_yy = _mm256_mul_ps(_mm256_set1_ps(.5), tmp_yy);
-      tmp_yy = _mm256_mul_ps(tmp_yy, _mm256_sub_ps(_mm256_set1_ps(3), almostOne));
-#ifdef DOUBLE_PERCISION
-      tmp_yy_pd0 = _mm256_cvtps_pd(_mm256_castps256_ps128(tmp_yy));
-      tmp_yy_pd1 = _mm256_cvtps_pd(_mm256_extractf128_ps(tmp_yy, 1));
-      /*tmp_yy_pd0 = _mm256_sqrt_pd(tmp_yy_pd0);
-      tmp_yy_pd1 = _mm256_sqrt_pd(tmp_yy_pd1);
-      tmp_yy_pd0 = _mm256_div_pd(_mm256_set1_pd(1), tmp_yy_pd0);
-      tmp_yy_pd1 = _mm256_div_pd(_mm256_set1_pd(1), tmp_yy_pd1);*/
+      tmp_yy0 = _mm256_cvtepi32_pd(_mm256_castsi256_si128(ypulse_vec));
+      tmp_yy1 = _mm256_cvtepi32_pd(_mm256_extractf128_si256(ypulse_vec, 1));
+      tmp_yy0 = _mm256_add_pd(yy_vec, tmp_yy0);
+      tmp_yy1 = _mm256_add_pd(yy_vec, tmp_yy1);
+      tmp_yy0 = _mm256_sqrt_pd(tmp_yy0);
+      tmp_yy1 = _mm256_sqrt_pd(tmp_yy1);
       tmp_xy0 = _mm256_load_pd(x + j);
       tmp_xy1 = _mm256_load_pd(x + j + 4);
       tmp_xy0 = _mm256_add_pd(tmp_xy0, xy_vec);
       tmp_xy1 = _mm256_add_pd(tmp_xy1, xy_vec);
-      tmp_xy0 = _mm256_mul_pd(tmp_xy0, tmp_yy_pd0);
-      tmp_xy1 = _mm256_mul_pd(tmp_xy1, tmp_yy_pd1);
+      tmp_xy0 = _mm256_div_pd(tmp_xy0, tmp_yy0);
+      tmp_xy1 = _mm256_div_pd(tmp_xy1, tmp_yy1);
       quads = _mm256_fmadd_pd(indexes, accel_rate_vec, delta_rate_vec);
       tmp_xy0 = _mm256_fnmadd_pd(indexes, quads, tmp_xy0);
       blend_mask = _mm256_cmp_pd(tmp_xy0, best_costs, _CMP_GT_OS);
@@ -316,6 +304,21 @@ static double pvq_search_rdo_double(const od_val16 *xcoeff, int n, int k,
       best_positions = _mm256_blendv_pd(best_positions, indexes, blend_mask);
       indexes = _mm256_add_pd(indexes, _mm256_set1_pd(4));
 #else
+      __m256 tmp_yy;
+      __m256d tmp_xy_pd0;
+      __m256d tmp_xy_pd1;
+      __m256 tmp_xy;
+      __m256 quads;
+      __m256 blend_mask;
+      ypulse_vec = _mm256_loadu_si256((__m256i *)(ypulse + j));
+      ypulse_vec = _mm256_slli_epi32(ypulse_vec, 1);
+      tmp_yy = _mm256_cvtepi32_ps(ypulse_vec);
+      tmp_yy = _mm256_add_ps(yy_vec, tmp_yy);
+      __m256 input = tmp_yy;
+      tmp_yy = _mm256_rsqrt_ps(tmp_yy);
+      __m256 almostOne = _mm256_mul_ps(input, _mm256_mul_ps(tmp_yy, tmp_yy));
+      tmp_yy = _mm256_mul_ps(_mm256_set1_ps(.5), tmp_yy);
+      tmp_yy = _mm256_mul_ps(tmp_yy, _mm256_sub_ps(_mm256_set1_ps(3), almostOne));
       tmp_xy_pd0 = _mm256_load_pd(x + j);
       tmp_xy_pd1 = _mm256_load_pd(x + j + 4);
       tmp_xy = _mm256_castps128_ps256(_mm256_cvtpd_ps(tmp_xy_pd0));
@@ -349,9 +352,7 @@ static double pvq_search_rdo_double(const od_val16 *xcoeff, int n, int k,
       /* Use ucomigt instead??? */
       blend_mask = _mm_cmp_sd(upper_costs, lower_costs, _CMP_GT_OS);
       best_cost = _mm_blendv_pd(lower_costs, upper_costs, blend_mask);
-      /*lower_costs = _mm_blendv_pd(lower_costs, upper_costs, blend_mask);*/
       lower_positions = _mm_blendv_pd(lower_positions, upper_positions, blend_mask);
-      /*best_cost = _mm_cvtsd_f64(lower_costs);*/
       pos = _mm_cvtsd_si32(lower_positions);
 #else
       __m128 lower_costs;
@@ -379,21 +380,20 @@ static double pvq_search_rdo_double(const od_val16 *xcoeff, int n, int k,
       pos = _mm_cvtss_si32(lower_positions);
 #endif
     }
+#endif
     for (; j < n; j++) {
 #ifdef DOUBLE_PERCISION
       __m128d index;
       __m128d tmp_xy;
-      __m128 tmp_yy;
-      __m128d tmp_yy_sd;
+      __m128d tmp_yy;
       __m128d quad;
       index = _mm_set_sd(j);
-      tmp_yy = _mm_set_ss(2*ypulse[j]);
-      tmp_yy = _mm_add_ss(tmp_yy, _mm256_castps256_ps128(yy_vec));
-      tmp_yy = _mm_rsqrt_ss(tmp_yy);
-      tmp_yy_sd = _mm_cvtss_sd(_mm_setzero_pd(), tmp_yy);
+      tmp_yy = _mm_set_sd(2*ypulse[j]);
+      tmp_yy = _mm_add_sd(tmp_yy, _mm256_castpd256_pd128(yy_vec));
+      tmp_yy = _mm_sqrt_sd(_mm_undefined_pd(), tmp_yy);
       tmp_xy = _mm_load_sd(x + j);
       tmp_xy = _mm_add_sd(tmp_xy, _mm256_castpd256_pd128(xy_vec));
-      tmp_xy = _mm_mul_sd(tmp_xy, tmp_yy_sd);
+      tmp_xy = _mm_div_sd(tmp_xy, tmp_yy);
       quad = _mm_fmadd_sd(index, _mm256_castpd256_pd128(accel_rate_vec), _mm256_castpd256_pd128(delta_rate_vec));
       tmp_xy = _mm_fnmadd_sd(index, quad, tmp_xy);
       if (_mm_ucomigt_sd(tmp_xy, best_cost)) {
