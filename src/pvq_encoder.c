@@ -409,7 +409,13 @@ static double pvq_search_rdo_double(const od_val16 *xcoeff, int n, int k,
       index = _mm_set_ss(j);
       tmp_yy = _mm_set_ss(2*ypulse[j]);
       tmp_yy = _mm_add_ss(tmp_yy, _mm256_castps256_ps128(yy_vec));
-      tmp_yy = _mm_rsqrt_ss(tmp_yy);
+
+      __m128 input = tmp_yy;
+       tmp_yy = _mm_rsqrt_ss(tmp_yy);
+     __m128 almostOne = _mm_mul_ss(input, _mm_mul_ss(tmp_yy, tmp_yy));
+      tmp_yy = _mm_mul_ss(_mm_set1_ps(.5), tmp_yy);
+      tmp_yy = _mm_mul_ss(tmp_yy, _mm_sub_ss(_mm_set1_ps(3), almostOne));
+
       tmp_xy_sd = _mm_load_sd(x + j);
       tmp_xy = _mm_cvtsd_ss(_mm_setzero_ps(), tmp_xy_sd);
       tmp_xy = _mm_add_ss(tmp_xy, _mm256_castps256_ps128(xy_vec));
